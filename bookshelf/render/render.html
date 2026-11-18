@@ -33,6 +33,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { SSAOPass } from 'three/addons/postprocessing/SSAOPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 
 const P = new URLSearchParams(location.search);
 const VIEW = P.get('view') || 'hero';
@@ -573,6 +574,155 @@ if (VIEW === 'close') {
     labels([{ at: [b.pos[0] + d.X / 2, b.pos[1], b.pos[2] + d.Z * 0.45], dx: -150, dy: 60, accent: true,
               text: '<b>책을 뺀 칸</b><br>위 칸은 양옆 칸으로 하중을 넘긴다' }], cam, { x: 0, y: 0, w: W, h: H }, world);
   }
+}
+
+// ---------------- 막대·마디 골조 (가변형 개념) ----------------
+const ROD = { r: 4, node: 15, wood: 0xD8BC90, nodeCol: 0xF1EEE8 };
+// 칸 하나의 테두리 선분: 위아래 사각형, 기둥은 왼쪽 앞·뒤와 오른쪽 뒤 (오른쪽 앞은 책이 받친다)
+function baySegs(x0, x1, z0, z1, yf, yb = -4) {
+  const s = [];
+  for (const z of [z0, z1]) {
+    s.push(['x', yf, z, x0, x1], ['x', yb, z, x0, x1], ['y', x0, z, yf, yb], ['y', x1, z, yf, yb]);
+  }
+  s.push(['z', x0, yf, z0, z1], ['z', x0, yb, z0, z1], ['z', x1, yb, z0, z1]);
+  return s;
+}
+function spacerSegs(parts) {
+  const s = [];
+  for (const q of parts || []) {
+    const yf = -q.Y, yb = -4;
+    if (q.kind === 'plate') {
+      const z = q.z + q.H;
+      s.push(['x', yf, z, q.x, q.x + q.X], ['x', yb, z, q.x, q.x + q.X], ['y', q.x, z, yf, yb], ['y', q.x + q.X, z, yf, yb]);
+    } else {
+      const xc = q.x + q.X / 2;
+      s.push(['z', xc, yf, q.z, q.z + q.H + 10], ['z', xc, yb, q.z, q.z + q.H + 10]);
+    }
+  }
+  return s;
+}
+// 같은 선 위의 선분을 합치고, 끝점마다 마디를 둔다
+function buildFrame(segs) {
+  const lines = new Map(), nodes = new Map();
+  const key = (a, b, c) => `${a}|${Math.round(b * 10)}|${Math.round(c * 10)}`;
+  const pt = (ax, f1, f2, v) => ax === 'x' ? [v, f1, f2] : ax === 'y' ? [f1, v, f2] : [f1, f2, v];
+  for (const [ax, f1, f2, a, b] of segs) {
+    const k = key(ax, f1, f2);
+    if (!lines.has(k)) lines.set(k, { ax, f1, f2, iv: [] });
+    lines.get(k).iv.push([Math.min(a, b), Math.max(a, b)]);
+    for (const v of [a, b]) { const p = pt(ax, f1, f2, v); nodes.set(p.map(n => Math.round(n)).join(','), p); }
+  }
+  const rods = [];
+  for (const L of lines.values()) {
+    L.iv.sort((p, q) => p[0] - q[0]);
+    let [a, b] = L.iv[0];
+    for (const [c, d] of L.iv.slice(1)) { if (c <= b + 0.5) b = Math.max(b, d); else { rods.push([L.ax, L.f1, L.f2, a, b]); [a, b] = [c, d]; } }
+    rods.push([L.ax, L.f1, L.f2, a, b]);
+  }
+  const g = new THREE.Group();
+  const wood = new THREE.MeshStandardMaterial({ color: ROD.wood, roughness: 0.62 });
+  const nodeMat = STUDIO ? new THREE.MeshPhysicalMaterial({ color: ROD.nodeCol, roughness: 0.42, clearcoat: 0.2 }) : std(ROD.nodeCol, 0.6);
+  for (const [ax, f1, f2, a, b] of rods) {
+    const len = b - a - ROD.node * 0.6; if (len <= 0) continue;
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(ROD.r, ROD.r, len, 20), wood);
+    const mid = pt(ax, f1, f2, (a + b) / 2); m.position.set(...mid);
+    if (ax === 'x') m.rotation.z = Math.PI / 2; else if (ax === 'z') m.rotation.x = Math.PI / 2;
+    m.castShadow = m.receiveShadow = true; g.add(m);
+  }
+  const ng = new RoundedBoxGeometry(ROD.node, ROD.node, ROD.node, 3, 2.6);
+  for (const p of nodes.values()) {
+    const m = new THREE.Mesh(ng, nodeMat); m.position.set(...p); m.castShadow = m.receiveShadow = true; g.add(m);
+  }
+  g.userData = { rods: rods.length, nodes: nodes.size };
+  return g;
+}
+// 칸 안: 받침(높이 미세 조절) + 쐐기 손잡이 + 책
+function bayFill(b, withBook = true) {
+  const d = b.dims, g = new THREE.Group(), x0 = b.pos[0], z0 = b.pos[2], { T, HH } = eff(b);
+  const shoeH = d.Z - 2 * ROD.r - C.pad - HH;                  // 격자와 책 높이의 차이를 받침이 받는다
+  const bx = x0 + d.sx + C.clear_t;
+  const shoe = new THREE.Mesh(new THREE.BoxGeometry(d.X - 2, b.w, shoeH), std(COL.shoe, 0.7));
+  shoe.position.set(x0 + d.X / 2, -d.Y + b.w / 2, z0 + ROD.r + shoeH / 2); g.add(shoe);
+  const tab = new THREE.Mesh(new THREE.BoxGeometry(Math.min(12, T), 14, 6), std(COL.wedge, 0.55));
+  tab.position.set(bx + T / 2, -d.Y - 7, z0 + ROD.r + 3); g.add(tab);
+  if (withBook) {
+    const bk = bookMesh(b);
+    bk.position.set(bx + T / 2, -d.Y + b.w / 2, z0 + ROD.r + shoeH + HH / 2); g.add(bk);
+  }
+  shadowAll(g);
+  return g;
+}
+async function rodScene(L, opts = {}) {
+  const scene = new THREE.Scene(); scene.background = new THREE.Color(COL.bg);
+  const world = worldGroup(); scene.add(world);
+  const emptyIds = (P.get('empty') || '').split(',').filter(Boolean);
+  let segs = [];
+  for (const b of L.books) {
+    const d = b.dims;
+    segs = segs.concat(baySegs(b.pos[0], b.pos[0] + d.X, b.pos[2], b.pos[2] + d.Z, -d.Y));
+    if (!opts.frames) world.add(bayFill(b, !emptyIds.includes(b.id)));
+  }
+  segs = segs.concat(spacerSegs(L.shims));
+  const frame = buildFrame(segs); world.add(frame);
+  return { scene, world, frame, box: new THREE.Box3().setFromObject(world) };
+}
+
+if (VIEW === 'rods') {
+  const r = makeRenderer();
+  const { scene, world, frame, box } = await rodScene(layout, { frames: !!P.get('frames') });
+  addRoom(scene);
+  addLights(scene, box, [-0.9, 1.25, 0.95]);
+  const dir = (P.get('dir') || '-0.55,0.3,1').split(',').map(Number);
+  let focus = box;
+  if (P.get('box')) {
+    const [x0, x1, z0, z1] = P.get('box').split(',').map(Number);
+    focus = new THREE.Box3(new THREE.Vector3(x0, z0, 0), new THREE.Vector3(x1, z1, 260));
+  } else if (P.get('id')) {
+    const b = layout.books.find(x => x.id === P.get('id'));
+    focus = new THREE.Box3();
+    for (const id of [P.get('id'), ...(P.get('ids') || '').split(',').filter(Boolean)]) {
+      const q = layout.books.find(x => x.id === id), d = q.dims;
+      const a = new THREE.Vector3(q.pos[0], q.pos[2], 0), c = new THREE.Vector3(q.pos[0] + d.X, q.pos[2] + d.Z, d.Y);
+      focus.expandByPoint(a); focus.expandByPoint(c);
+    }
+    focus.expandByScalar(20);
+  }
+  const cam = perspective(focus, dir, +(P.get('fov') || 24), +(P.get('margin') || 0.8));
+  tighten(cam, box);
+  studioEnv(r, scene, +(P.get('env') || 0.75));
+  renderFinal(r, scene, cam);
+  for (const eid of (P.get('empty') || '').split(',').filter(Boolean)) {
+    const q = layout.books.find(x => x.id === eid), d = q.dims;
+    labels([{ at: [q.pos[0] + d.X / 2, -d.Y, q.pos[2] + d.Z * 0.45], dx: -150, dy: 70, accent: true,
+              text: '<b>책을 뺀 칸</b><br>위 칸은 이어진 골조로 옆 칸에 하중을 넘긴다' }], cam, { x: 0, y: 0, w: W, h: H }, world);
+  }
+  console.log('rods', frame.userData.rods, 'nodes', frame.userData.nodes);
+}
+
+// 출력형 모듈(A)과 막대·마디 칸(B)을 나란히
+if (VIEW === 'rodmod') {
+  const r = makeRenderer();
+  const b = layout.books.find(x => x.id === (P.get('id') || '11')), d = b.dims;
+  const empty = !!P.get('empty'), gap = +(P.get('gap') || 150);
+  const scene = new THREE.Scene(); scene.background = new THREE.Color(0xE6E7E3);
+  const g = worldGroup(); scene.add(g);
+  const A = await makeUnit(b, { dir: STLDIR, skel: false, frameOnly: empty });
+  A.position.set(-d.X - gap / 2, -d.Y / 2, 0); g.add(A);
+  const bb = { ...b, pos: [0, 0, 0] };
+  const B = new THREE.Group();
+  B.add(buildFrame(baySegs(0, d.X, 0, d.Z, -d.Y)));
+  if (!empty) B.add(bayFill(bb));
+  B.position.set(gap / 2, d.Y / 2, 0); g.add(B);
+  addCove(scene);
+  const box = new THREE.Box3().setFromObject(g);
+  addLights(scene, box, [-0.75, 1.35, 0.85], 2.6);
+  const dir = (P.get('dir') || '0.62,0.48,1').split(',').map(Number);
+  const cam = perspective(box, dir, +(P.get('fov') || 20), +(P.get('margin') || 0.78));
+  tighten(cam, box);
+  studioEnv(r, scene, +(P.get('env') || 0.8));
+  renderFinal(r, scene, cam);
+  g.updateMatrixWorld(true);
+  tagUnder('A · 출력형 칸', A, cam); tagUnder('B · 막대와 마디', B, cam);
 }
 
 window.__done = true;

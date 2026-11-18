@@ -42,7 +42,7 @@ for (const s of shots) {
                     contentType: TYPES[extname(file)] || 'application/octet-stream' });
   });
   page.on('pageerror', e => console.error(s.name, 'pageerror', e.message));
-  page.on('console', m => { if (m.type() === 'error') console.error(s.name, m.text()); });
+  page.on('console', m => { if (m.type() === 'error' || process.env.LOGS) console.error(s.name, m.text()); });
   const t = Date.now();
   await page.goto(BASE + s.url);
   await page.waitForFunction(() => window.__done === true, null, { timeout: 300000 });
