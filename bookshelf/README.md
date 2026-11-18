@@ -16,12 +16,10 @@
 - **쌓는 규칙**: 들어온 순서대로, 지금 형태에서 가장 낮고 아래 모듈이 받쳐 주는 자리에 놓는다
   (닿는 면이 중심을 포함하고, 깊이의 75%·면적의 40% 이상). 자리가 없으면 옆으로 넓힌다.
   깊은 미술책은 얕은 페이퍼백 위에 거의 올라가지 못해서, 대체로 미술책끼리 겹쳐 높은 봉우리가 되고
-  페이퍼백이 그 사이를 채운다. 가장 깊은 가로형 책은 가로형 책 위에만 올라가서 탑 가운데 깊은 기둥 하나로 모인다.
-  대신 늦게 들어온 무거운 책이 위로 가서 위가 무거워지므로, 벽 고정이 필수다.
-- **세워 꽂기 / 눕혀 꽂기**: `lay = true`면 책등은 앞을 향한 채 두께가 위아래가 된다.
-  예시 28권 중 가로형 7권을 세우면 330 × 1050 mm의 탑, 눕히면 눕힌 책이 기단이 되어 1310 × 380 mm로 낮고 길게 퍼진다.
+  페이퍼백이 그 사이를 채운다. 대신 늦게 들어온 무겁고 두꺼운 책이 위로 가서 위가 무거워지므로, 벽 고정이 필수다.
+- **눕혀 꽂기**: 책마다 `"lay": true`를 주면 책등은 앞을 향한 채 두께가 위아래가 된다 (큰 판형 보관용).
 
-![compare](renders/compare.png)
+![silhouette](renders/silhouette.png)
 
 ![detail](renders/detail.png)
 
@@ -30,9 +28,9 @@
 | 파일 | 내용 |
 |---|---|
 | `book_module.scad` | 파라메트릭 모듈 (OpenSCAD). 책 치수를 넣으면 모듈·받침·쐐기·핀이 나온다 |
-| `books.json` | 장서 목록 (지금은 예시용 가상 장서 28권: 미술책 14(가로형 7), 철학·인문 페이퍼백 14) |
+| `books.json` | 장서 목록 (지금은 예시용 가상 장서 28권: 미술책 14(책등 48~90 mm의 두꺼운 책 6), 철학·인문 페이퍼백 14) |
 | `layout.py` | 치수 계산 → 쌓는 위치 → `out/layout.json`, `assembly.scad`, STL |
-| `assembly.scad`, `assembly_lay.scad` | 전체 책장 미리보기 (세운 것 / 가로형을 눕힌 것) |
+| `assembly.scad` | 전체 책장 미리보기 (OpenSCAD에서 열기) |
 | `render/` | three.js + Playwright 렌더러 |
 | `renders/` | 렌더 이미지 |
 
@@ -42,8 +40,6 @@
 # 1) books.json에 책 추가 (id, label, h, w, t, date, color)
 # 2) 배치와 STL
 python3 layout.py --stl out/stl
-#    가로형을 모두 눕힌 변형
-python3 layout.py --lay-landscape --out out_lay --stl out_lay/stl --assembly assembly_lay.scad
 # 3) 렌더 (render 폴더에서 npm install 한 번)
 node render/shoot.mjs            # 또는: node render/shoot.mjs hero silhouette
 ```
@@ -56,10 +52,9 @@ node render/shoot.mjs            # 또는: node render/shoot.mjs hero silhouette
 - 몇 년씩 하중을 받는 부품이라 PETG 권장.
 - A2L 출력 범위(330×320×325) 기준으로 책 높이 약 308 mm까지 한 번에 나온다. 넘으면 OpenSCAD 콘솔에
   `FITS_BED false`가 찍힌다 (나눠 뽑는 기능은 아직 없음).
-- 예시 28권의 꽉 채운 부피는 세웠을 때 PETG 약 10.3 kg(권당 평균 370 g), 가로형을 눕혔을 때 약 17.5 kg이다.
-  눕힌 칸은 책의 넓은 면 전체를 바닥판·윗판으로 감싸서 재료가 많이 든다 (받침은 리브만 남겨 이미 줄였다).
-  실제 출력은 벽 몇 겹과 채움이라 이 값보다 가볍다.
-- 책 너비(= 칸 깊이)는 약 326 mm까지. 세우든 눕히든 깊이는 같아서, 이보다 넓은 가로형은 한 번에 안 나온다.
+- 예시 28권의 꽉 채운 부피는 PETG 약 12.5 kg(권당 평균 450 g)이다. 두꺼운 책 칸일수록 판이 넓어져 재료가 많이 든다
+  (넓은 받침은 리브만 남겨 줄였다). 실제 출력은 벽 몇 겹과 채움이라 이 값보다 가볍다.
+- 책 너비(= 칸 깊이)는 약 326 mm까지 한 번에 나온다.
 
 ## 아직 검증하지 않은 것
 

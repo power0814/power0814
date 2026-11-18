@@ -17,12 +17,9 @@ const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.json': 'applic
 const shots = [
   { name: 'hero',       url: '/render/render.html?view=hero&w=1600&h=1200',  w: 1600, h: 1200 },
   { name: 'front',      url: '/render/render.html?view=front&w=1000&h=1200', w: 1000, h: 1200 },
-  { name: 'detail',     url: '/render/render.html?view=detail&id=06&w=1800&h=1000', w: 1800, h: 1000 },
+  { name: 'detail',     url: '/render/render.html?view=detail&id=27&w=1800&h=1000', w: 1800, h: 1000 },
   { name: 'silhouette', url: '/render/drawing.html?fig=silhouette', w: 1600, h: 1160 },
   { name: 'growth',     url: '/render/drawing.html?fig=growth',     w: 1800, h: 900 },
-  // 가로형을 눕혀 꽂은 변형 (python3 layout.py --lay-landscape --out out_lay ...)
-  { name: 'hero_lay',   url: '/render/render.html?view=hero&out=out_lay&w=1800&h=1100', w: 1800, h: 1100 },
-  { name: 'compare',    url: '/render/drawing.html?fig=compare',    w: 1800, h: 1000 },
 ];
 const only = process.argv.slice(2);
 
