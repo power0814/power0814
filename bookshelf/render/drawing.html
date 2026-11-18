@@ -26,13 +26,22 @@ const P = new URLSearchParams(location.search);
 const FIG = P.get('fig') || 'silhouette';
 const OUT = P.get('out') || 'out';
 const NS = 'http://www.w3.org/2000/svg';
-const load = async dir => (await (await fetch(`../${dir}/layout.json`)).json()).books;
-const wide = b => b.t >= 45;   // 책등이 넓은 책
+const loadAll = async path => (await fetch(`../${path}`)).json();
+const loadL = async (dir = OUT) => loadAll(`${dir}/layout.json`);
 
 function rectsOf(books) {
   const rects = books.map(b => ({ id: b.id, x: b.pos[0], z: b.pos[2], X: b.dims.X, Z: b.dims.Z, b }));
-  return { rects, W: Math.max(...rects.map(r => r.x + r.X)), H: Math.max(...rects.map(r => r.z + r.Z)) };
+  const kg = books.reduce((a, b) => a + b.kg, 0);
+  return { rects, W: Math.max(...rects.map(r => r.x + r.X)), H: Math.max(...rects.map(r => r.z + r.Z)),
+           com: rects.reduce((a, r) => a + r.b.kg * (r.z + r.Z / 2), 0) / kg };
 }
+
+// 무게 → 진하기 (가벼움 0.1 kg ~ 무거움 7 kg, 로그 척도)
+const KG0 = 0.1, KG1 = 7;
+const wt = kg => Math.min(1, Math.max(0, Math.log(kg / KG0) / Math.log(KG1 / KG0)));
+const mix = (a, b, t) => '#' + [0, 2, 4].map(i => Math.round(parseInt(a.substr(i, 2), 16) * (1 - t) +
+  parseInt(b.substr(i, 2), 16) * t).toString(16).padStart(2, '0')).join('');
+const shade = kg => mix('D6CFC3', '1D1D1B', wt(kg));
 
 function svg(w, h) {
   const s = document.createElementNS(NS, 'svg');
@@ -50,15 +59,27 @@ const el = (parent, tag, attrs, txt) => {
 // 정면 실루엣: 모듈 앞면 사각형. 이음매는 배경색 선으로.
 function silhouette(g, list, width, ox, gy, s, opts = {}) {
   for (const r of list) {
-    const fill = opts.fill ? opts.fill(r) : 'var(--ink)';
+    const fill = opts.fill ? opts.fill(r) : shade(r.b.kg);
     el(g, 'rect', { x: ox + r.x * s, y: gy - (r.z + r.Z) * s, width: r.X * s, height: r.Z * s,
                     fill, stroke: 'var(--bg)', 'stroke-width': opts.joint ?? 1.4 });
     if (opts.numbers && r.Z * s > 18)
-      el(g, 'text', { x: ox + (r.x + r.X / 2) * s, y: gy - (r.z + r.Z) * s + 14,
-                      'text-anchor': 'middle', class: 'num' }, r.id);
+      el(g, 'text', { x: ox + (r.x + r.X / 2) * s, y: gy - (r.z + r.Z) * s + 14, 'text-anchor': 'middle',
+                      class: 'num', fill: wt(r.b.kg) > 0.45 ? 'var(--bg)' : 'var(--ink)' }, r.id);
   }
   el(g, 'line', { x1: ox - 60, x2: ox + width * s + 60, y1: gy + 0.7, y2: gy + 0.7,
                   stroke: 'var(--ink)', 'stroke-width': 1.4 });
+}
+
+// 최대 높이(창턱) 선과 무게중심 표시
+function limitLine(g, x1, x2, gy, s, maxH, label = true) {
+  const y = gy - maxH * s;
+  el(g, 'line', { x1, x2, y1: y, y2: y, stroke: 'var(--accent)', 'stroke-width': 1.4, 'stroke-dasharray': '7 5' });
+  if (label) el(g, 'text', { x: x1, y: y - 10, class: 'capm', fill: '#A9502E' }, `최대 ${maxH} mm · 이 위는 창문`);
+}
+function comMark(g, x, gy, s, com, text = true) {
+  const y = gy - com * s;
+  el(g, 'path', { d: `M ${x} ${y} l 12 -7 l 0 14 z`, fill: 'var(--accent)' });
+  if (text) el(g, 'text', { x: x + 18, y: y + 4, class: 'dim', fill: '#A9502E' }, `무게중심 ${Math.round(com)}`);
 }
 
 function dimH(g, x1, x2, y, label) {
@@ -78,44 +99,59 @@ function scaleBar(g, x, y, s) {
   ['0', '100', '200 mm'].forEach((t, i) =>
     el(g, 'text', { x: x + i * 100 * s, y: y + 22, 'text-anchor': i === 2 ? 'start' : 'middle', class: 'dim' }, t));
 }
+function weightKey(g, x, y) {
+  const n = 40, w = 220;
+  for (let i = 0; i < n; i++)
+    el(g, 'rect', { x: x + i * w / n, y, width: w / n + 0.5, height: 10, fill: shade(KG0 * (KG1 / KG0) ** (i / (n - 1))) });
+  el(g, 'text', { x, y: y + 26, class: 'dim' }, `${KG0} kg`);
+  el(g, 'text', { x: x + w, y: y + 26, 'text-anchor': 'end', class: 'dim' }, `${KG1} kg`);
+  el(g, 'text', { x: x + w / 2, y: y + 26, 'text-anchor': 'middle', class: 'dim' }, '책 무게');
+}
 
 if (FIG === 'silhouette') {
-  const books = await load(OUT), { rects, W: tw, H: th } = rectsOf(books);
-  const W = 1600, H = 1160, s = Math.min(860 / th, 560 / tw);
+  const L = await loadL(), books = L.books, { rects, W: tw, H: th, com } = rectsOf(books);
+  const maxH = L.max_height || th;
+  const W = 1600, H = 1240, s = Math.min(860 / Math.max(th, maxH), 560 / tw);
   const g = svg(W, H);
   el(g, 'text', { x: 64, y: 78, class: 't1' }, '장서의 실루엣 — 정면도');
   el(g, 'text', { x: 64, y: 106, class: 't2' },
-     `예시 장서 ${books.length}권 · 한 칸에 한 권 · 바깥 치수 10 mm 격자 · 들어온 순서대로 쌓음 · 주황 = 책등 45 mm 넘는 두꺼운 책`);
-  const ox = 150, gy = 1070;
-  silhouette(g, rects, tw, ox, gy, s, { numbers: true,
-    fill: r => (wide(r.b) ? 'var(--accent)' : 'var(--ink)') });
+     `예시 장서 ${books.length}권 · 한 칸에 한 권 · 10 mm 격자 · 들어온 순서대로 · 더 무거운 책 위에만, 무거울수록 낮게 · 진할수록 무거움`);
+  const ox = 120, gy = 1070;
+  silhouette(g, rects, tw, ox, gy, s, { numbers: true });
+  limitLine(g, ox - 60, ox + tw * s + 60, gy, s, maxH);
+  comMark(g, ox + tw * s + 8, gy, s, com);
   dimH(g, ox, ox + tw * s, gy + 34, `${tw}`);
-  dimV(g, ox + tw * s + 40, gy, gy - th * s, `${th}`);
-  scaleBar(g, ox + tw * s + 120, gy - 6, s);
+  dimV(g, ox + tw * s + 150, gy, gy - th * s, `${th}`);
+  scaleBar(g, ox, gy + 64, s);
+  weightKey(g, ox + 300 * s + 40, gy + 64);
 
-  const lx = 860; let ly = 170;
-  el(g, 'text', { x: lx, y: ly - 26, class: 'cap' }, '번호 · 책 · 책 치수(높이×너비×두께) · 입고일');
-  el(g, 'text', { x: lx + 460, y: ly - 26, class: 'capm' }, '모듈');
-  el(g, 'line', { x1: lx, x2: lx + 680, y1: ly - 14, y2: ly - 14, stroke: 'var(--rule)' });
+  const lx = 830; let ly = 170;
+  el(g, 'text', { x: lx, y: ly - 26, class: 'cap' }, '번호 · 책 · 책 치수(높이×너비×두께)');
+  el(g, 'text', { x: lx + 440, y: ly - 26, class: 'capm' }, '무게');
+  el(g, 'text', { x: lx + 500, y: ly - 26, class: 'capm' }, '모듈');
+  el(g, 'text', { x: lx + 650, y: ly - 26, class: 'capm' }, '입고일');
+  el(g, 'line', { x1: lx, x2: lx + 720, y1: ly - 14, y2: ly - 14, stroke: 'var(--rule)' });
   for (const b of books) {
-    el(g, 'rect', { x: lx, y: ly - 11, width: 14, height: 14, fill: b.color, stroke: '#00000022' });
+    el(g, 'rect', { x: lx, y: ly - 11, width: 14, height: 14, fill: shade(b.kg) });
     el(g, 'text', { x: lx + 26, y: ly + 1, class: 'legm' }, b.id);
-    el(g, 'text', { x: lx + 56, y: ly + 1, class: 'leg', fill: wide(b) ? '#A9502E' : 'var(--ink)' },
-       b.label + (b.lay ? ' (눕힘)' : ''));
-    el(g, 'text', { x: lx + 330, y: ly + 1, class: 'legm' }, `${b.h}×${b.w}×${b.t}`);
-    el(g, 'text', { x: lx + 460, y: ly + 1, class: 'legm' }, `→ ${b.dims.X}×${b.dims.Y}×${b.dims.Z}`);
-    el(g, 'text', { x: lx + 610, y: ly + 1, class: 'legm' }, b.date);
+    el(g, 'text', { x: lx + 56, y: ly + 1, class: 'leg' }, b.label + (b.lay ? ' (눕힘)' : ''));
+    el(g, 'text', { x: lx + 320, y: ly + 1, class: 'legm' }, `${b.h}×${b.w}×${b.t}`);
+    el(g, 'text', { x: lx + 440, y: ly + 1, class: 'legm' }, `${b.kg.toFixed(1)}`);
+    el(g, 'text', { x: lx + 500, y: ly + 1, class: 'legm' }, `${b.dims.X}×${b.dims.Y}×${b.dims.Z}`);
+    el(g, 'text', { x: lx + 650, y: ly + 1, class: 'legm' }, b.date);
     ly += Math.min(33, 880 / books.length);
   }
+  el(g, 'text', { x: lx, y: ly + 16, class: 'capm' }, '무게는 판형 부피로 추정한 값 (미술책 1.0, 페이퍼백 0.65 g/cm³)');
 }
 
 if (FIG === 'growth') {
-  const books = await load(OUT), { rects, W: tw, H: th } = rectsOf(books);
-  const W = 1800, H = 900, s = Math.min(600 / th, 340 / tw);
+  const L = await loadL(), books = L.books, { rects, W: tw, H: th } = rectsOf(books);
+  const maxH = L.max_height || th;
+  const W = 1800, H = 900, s = Math.min(600 / Math.max(th, maxH), 340 / tw);
   const g = svg(W, H);
   el(g, 'text', { x: 64, y: 78, class: 't1' }, '자라는 순서');
   el(g, 'text', { x: 64, y: 106, class: 't2' },
-     '새 책은 들어온 순서대로, 지금 형태에서 가장 낮고 아래 모듈이 받쳐 주는 자리에 놓인다. 주황 = 직전 단계 이후 들어온 책');
+     '새 책은 들어온 순서대로, 가장 낮고 받쳐지는 자리에. 무거운 책은 가벼운 책 위로 못 올라가고 높이 시작할 수도 없어서, 무거운 책이 오면 옆으로 넓어진다. 주황 = 직전 단계 이후 들어온 책');
   const n = books.length, steps = [Math.round(n / 4), Math.round(n / 2), Math.round(3 * n / 4), n];
   const gy = 790, panel = (W - 128) / steps.length;
   steps.forEach((k, i) => {
@@ -123,9 +159,33 @@ if (FIG === 'growth') {
     const ox = 64 + i * panel + (panel - tw * s) / 2;
     silhouette(g, rects.slice(0, k), tw, ox, gy, s, {
       fill: r => (+r.id > prev ? 'var(--accent)' : 'var(--ink)'), joint: 1.2 });
+    limitLine(g, ox - 30, ox + tw * s + 30, gy, s, maxH, i === 0);
     el(g, 'text', { x: ox + tw * s / 2, y: gy + 40, 'text-anchor': 'middle', class: 'cap' }, `${k}권`);
     el(g, 'text', { x: ox + tw * s / 2, y: gy + 62, 'text-anchor': 'middle', class: 'capm' }, `~ ${books[k - 1].date}`);
   });
+}
+
+// 무게 규칙 전과 후
+if (FIG === 'rule') {
+  const A = rectsOf((await loadAll('out/old/layout.json')).books);
+  const L = await loadL(), B = rectsOf(L.books), maxH = L.max_height;
+  const W = 1600, H = 1050, gap = 260;
+  const s = Math.min(760 / Math.max(A.H, B.H, maxH), (W - 260 - gap) / (A.W + B.W));
+  const g = svg(W, H);
+  el(g, 'text', { x: 64, y: 78, class: 't1' }, '무거운 책은 아래로');
+  el(g, 'text', { x: 64, y: 106, class: 't2' }, `같은 ${A.rects.length}권, 같은 순서. 진할수록 무거운 책`);
+  const gy = 920, oxA = 140, oxB = oxA + A.W * s + gap;
+  for (const [R, ox, cap, sub] of [
+      [A, oxA, '이전 규칙', '무게를 보지 않음'],
+      [B, oxB, '새 규칙', `더 무거운 책 위에만 · 무거울수록 낮게 · 최대 ${maxH} mm`]]) {
+    silhouette(g, R.rects, R.W, ox, gy, s, { joint: 1.2 });
+    comMark(g, ox + R.W * s + 10, gy, s, R.com);
+    dimH(g, ox, ox + R.W * s, gy + 30, `${R.W}`);
+    el(g, 'text', { x: ox, y: gy + 76, class: 'cap' }, `${cap} — 높이 ${R.H} mm`);
+    el(g, 'text', { x: ox, y: gy + 98, class: 'capm' }, sub);
+  }
+  limitLine(g, oxA - 60, oxB + B.W * s + 120, gy, s, maxH);
+  weightKey(g, W - 300, 150);
 }
 
 window.__done = true;

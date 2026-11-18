@@ -16,10 +16,13 @@ const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.json': 'applic
 
 const shots = [
   { name: 'hero',       url: '/render/render.html?view=hero&w=1600&h=1200',  w: 1600, h: 1200 },
+  { name: 'context',    url: '/render/render.html?view=hero&ctx=1&w=1600&h=1200', w: 1600, h: 1200 },
   { name: 'front',      url: '/render/render.html?view=front&w=1000&h=1200', w: 1000, h: 1200 },
   { name: 'detail',     url: '/render/render.html?view=detail&id=27&w=1800&h=1000', w: 1800, h: 1000 },
-  { name: 'silhouette', url: '/render/drawing.html?fig=silhouette', w: 1600, h: 1160 },
+  { name: 'silhouette', url: '/render/drawing.html?fig=silhouette', w: 1600, h: 1240 },
   { name: 'growth',     url: '/render/drawing.html?fig=growth',     w: 1800, h: 900 },
+  // 무게 규칙 전후 비교: python3 layout.py --no-heavy-low --max-height 99999 --out out/old
+  { name: 'rule',       url: '/render/drawing.html?fig=rule',       w: 1600, h: 1050 },
 ];
 const only = process.argv.slice(2);
 

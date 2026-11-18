@@ -195,6 +195,24 @@ function text(cls, html, x, y) {
 }
 
 // ------------------------------------------------------------
+// 최대 높이 위의 창문 (창턱 = max_height)
+function addWindow(scene, cx, sill) {
+  const w = 1400, h = 1100, f = 45;
+  const glass = new THREE.Mesh(new THREE.PlaneGeometry(w, h),
+    new THREE.MeshStandardMaterial({ color: 0xE9F0F4, emissive: 0xDCE7EE, emissiveIntensity: 0.55, roughness: 0.3 }));
+  glass.position.set(cx, sill + h / 2, 1); scene.add(glass);
+  const frameMat = std(0xFBFAF7, 0.6);
+  const bar = (bw, bh, x, y, d = 40) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, d), frameMat);
+    m.position.set(x, y, d / 2); m.castShadow = m.receiveShadow = true; scene.add(m);
+  };
+  bar(w + 2 * f, f, cx, sill + h + f / 2);           // 위
+  bar(f, h, cx - w / 2 - f / 2, sill + h / 2);       // 왼쪽
+  bar(f, h, cx + w / 2 + f / 2, sill + h / 2);       // 오른쪽
+  bar(f * 0.6, h, cx, sill + h / 2, 30);             // 가운데 창살
+  bar(w + 2 * f + 60, 22, cx, sill - 11, 70);        // 창턱
+}
+
 async function shelfScene(books) {
   const scene = new THREE.Scene(); scene.background = new THREE.Color(COL.bg);
   const world = worldGroup(); scene.add(world);
@@ -205,6 +223,12 @@ async function shelfScene(books) {
   }
   const box = new THREE.Box3().setFromObject(world);
   addRoom(scene);
+  const sill = layout.max_height;
+  if (sill) {
+    const c = box.getCenter(new THREE.Vector3());
+    addWindow(scene, c.x, sill);
+    if (P.get('ctx')) box.expandByPoint(new THREE.Vector3(c.x, sill + 90, 0));   // 창문까지 보이게
+  }
   return { scene, world, box };
 }
 
