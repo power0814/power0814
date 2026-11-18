@@ -199,16 +199,16 @@ function supportsOf(R, r) {
 if (FIG === 'bond') {
   const sets = [
     { L: await loadL('out'), cap: '지금 규칙', sub: '엇쌓기 없음' },
-    { L: await loadL('out/bond_strict'), cap: '엄격한 엇쌓기', sub: '괴임 ≤ 40 · 받침 깊이 75% · 받치는 칸 무게 ≥ ½' },
-    { L: await loadL('out/bond'), cap: '완화한 엇쌓기', sub: '괴임 ≤ 80 · 받침 깊이 60% · 무게 비율 조건 없음' },
+    { L: await loadL('out/bond'), cap: '괴임 엇쌓기', sub: '위 칸이 직접 두 칸에 걸치고 높이 차이만 괴임으로' },
+    { L: await loadL('out/spacer'), cap: '스페이서 받침', sub: '위 칸마다 계단형 받침이 두 칸 이상을 묶는다 (양옆 40 mm까지 넓어짐)' },
   ].map(s => ({ ...s, R: rectsOf(s.L.books), shims: (s.L.shims || []).map(q => ({ x: q.x, z: q.z, X: q.X, Z: q.H })) }));
   const W = 1800, H = 1000, gap = 110;
   const totW = sets.reduce((a, s) => a + s.R.W, 0);
   const maxH = Math.max(...sets.map(s => Math.max(s.R.H, s.L.max_height || 0)));
   const s = Math.min(680 / maxH, (W - 160 - gap * 2) / totW);
   const g = svg(W, H);
-  el(g, 'text', { x: 64, y: 78, class: 't1' }, '엇쌓기: 위 칸이 아래 칸 두 개에 걸치게');
-  el(g, 'text', { x: 64, y: 106, class: 't2' }, '같은 28권, 같은 순서. 진할수록 무거운 책, 주황 = 높이 차이를 메우는 괴임 블록 (10 mm 단위)');
+  el(g, 'text', { x: 64, y: 78, class: 't1' }, '하나를 빼도 옆으로: 괴임과 스페이서');
+  el(g, 'text', { x: 64, y: 106, class: 't2' }, '같은 28권, 같은 순서. 진할수록 무거운 책, 주황 = 괴임·스페이서 (10 mm 단위)');
   const gy = 850; let ox = 80;
   for (const st of sets) {
     const R = st.R;
@@ -223,7 +223,8 @@ if (FIG === 'bond') {
     el(g, 'text', { x: ox, y: gy + 72, class: 'cap' }, st.cap);
     el(g, 'text', { x: ox, y: gy + 93, class: 'capm' }, st.sub);
     el(g, 'text', { x: ox, y: gy + 112, class: 'capm' },
-       `위 칸 ${ups.length}개 중 ${single ? `${single}개가 한 칸에만 얹힘` : '전부 두 칸 이상에 걸침'} · 바닥 ${R.rects.length - ups.length}개 · 괴임 ${st.shims.length}개`);
+       `위 칸 ${ups.length}개 중 ${single ? `${single}개가 한 칸에만 얹힘` : '전부 두 칸 이상에 걸침'} · 바닥 ${R.rects.length - ups.length}개 · ` +
+       (st.L.spacer ? `스페이서 ${(st.L.shims || []).filter(q => q.kind === 'plate').length}개` : `괴임 ${st.shims.length}개`));
     ox += R.W * s + gap;
   }
   el(g, 'text', { x: 80, y: gy - (sets[0].L.max_height) * s - 10, class: 'capm', fill: '#A9502E' }, '최대 1500 mm');
@@ -231,7 +232,7 @@ if (FIG === 'bond') {
 
 // 책 한 권을 빼면: 위 칸이 빈자리를 건너 옆 칸으로 하중을 넘긴다
 if (FIG === 'remove') {
-  const L = await loadL(P.get('src') || 'out/bond'), R = rectsOf(L.books);
+  const L = await loadL(P.get('src') || 'out/spacer'), R = rectsOf(L.books);
   const shims = (L.shims || []).map(q => ({ x: q.x, z: q.z, X: q.X, Z: q.H, q }));
   // 위에 얹힌 칸이 가장 많은 바닥 칸을 고른다
   const score = r => R.rects.filter(u => (u.b.supports || []).includes(r.id)).length;
@@ -259,7 +260,7 @@ if (FIG === 'remove') {
     }
   }
   el(g, 'text', { x: ox, y: gy + 40, class: 'capm' },
-     `${M.id} 위에 걸친 칸 ${above.length}개(진한 회색)가 모두 다른 칸에도 걸쳐 있어서, 빈자리를 건너 하중을 옆으로 넘긴다.`);
+     `${M.id} 위의 칸 ${above.length}개(진한 회색)는 스페이서가 다른 칸에도 걸쳐 있어서, 빈자리를 건너 하중이 옆으로 간다.`);
 }
 
 window.__done = true;

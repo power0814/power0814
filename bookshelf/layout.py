@@ -186,6 +186,91 @@ def place_bond(books, width_mm, max_h=1500, heavy_low=True, max_shim=40, min_sha
     return placed, shims
 
 
+def place_spacer(books, width_mm, max_h=1500, heavy_low=True, spacer_t=10, max_leg=120, min_leg_mm=20,
+                 target_mm=None, max_ext_mm=40):
+    """스페이서 받침: 위 칸마다 계단형 받침 하나를 깐다.
+
+    받침 윗면은 평평한 판(spacer_t)이고, 밑은 아래 칸들의 윗면 높이에 맞춰 다리가 내려간다.
+    받침은 위 칸보다 양옆으로 max_ext_mm까지 넓어질 수 있어서, 좁은 칸도 이웃 칸까지 걸친다.
+    받침은 아래 칸 두 개 이상에 걸쳐야 하고(다리마다 폭 min_leg_mm 이상), 다리 길이는 max_leg 이하.
+    받침이 아래 칸들을 핀으로 묶어 짧은 보처럼 줄눈을 건너므로, 아래 책 하나가 빠져도
+    위 칸의 하중이 옆 칸으로 간다. target_mm 폭 안을 먼저 채우고, 자리가 없을 때만 넓힌다.
+    """
+    nx = 400
+    ny = int(max(b["dims"]["Y"] for b in books) // GRID)
+    hmap = np.zeros((nx, ny), dtype=int)
+    top = np.full((nx, ny), -1, dtype=int)
+    limit = width_mm // GRID
+    target = (target_mm or width_mm) // GRID
+    min_cols = max(1, min_leg_mm // GRID)
+    E = max_ext_mm // GRID
+    placed, parts = [], []
+    for i, b in enumerate(books):
+        d = b["dims"]
+        X, Y, Z = int(d["X"] // GRID), int(d["Y"] // GRID), int(d["Z"])
+        while True:
+            best = None
+            for x0 in range(0, limit - X + 1):
+                if int(hmap[x0:x0 + X, 0:Y].max()) == 0:      # 바닥
+                    cand = (int(x0 + X > target), 0, 0, 0, x0, None)
+                    if best is None or cand[:5] < best[:5]:
+                        best = cand
+                    continue
+                for el in range(0, E + 1):
+                    for er in range(0, E + 1):
+                        s0, s1 = x0 - el, x0 + X + er
+                        if s0 < 0 or s1 > limit:
+                            continue
+                        foot = hmap[s0:s1, 0:Y]
+                        own = top[s0:s1, 0:Y]
+                        hi = int(foot.max())
+                        base = hi + spacer_t
+                        if base + Z > max_h or (heavy_low and base > base_cap(b["kg"], max_h)):
+                            continue
+                        contact = foot >= hi - max_leg
+                        ys = np.where(contact.any(axis=0))[0]
+                        if ys.max() + 1 < 0.6 * Y or contact.sum() < 0.4 * (s1 - s0) * Y:
+                            continue
+                        legs, vol = [], 0
+                        for o in np.unique(own[contact]):
+                            cells = (own == o) & contact
+                            cols = np.where(cells.any(axis=1))[0]
+                            if len(cols) < min_cols:
+                                continue
+                            rows = np.where(cells.any(axis=0))[0]
+                            h_o = int(foot[cells].max())
+                            legs.append((int(o), cols + s0, rows, h_o))
+                            vol += (hi - h_o) * int(cells.sum())
+                        if len(legs) < 2:
+                            continue
+                        lx0 = min(int(c.min()) for _, c, _, _ in legs)
+                        lx1 = max(int(c.max()) + 1 for _, c, _, _ in legs)
+                        if not (lx0 + 0.25 <= x0 + X / 2 <= lx1 - 0.25):   # 위 칸 중심이 다리 사이에
+                            continue
+                        cand = (int(max(s1, x0 + X) > target), base, el + er, vol, x0, (s0, s1, legs))
+                        if best is None or cand[:5] < best[:5]:
+                            best = cand
+            if best:
+                break
+            limit += X
+        _, base, _, _, x0, sp = best
+        legs = []
+        if sp:
+            s0, s1, legs = sp
+            parts.append({"kind": "plate", "x": s0 * GRID, "X": (s1 - s0) * GRID, "Y": Y * GRID,
+                          "z": base - spacer_t, "H": spacer_t, "over": b["id"]})
+            for o, cols, rows, h_o in legs:
+                if base - spacer_t > h_o:
+                    parts.append({"kind": "leg", "x": int(cols.min()) * GRID, "X": len(cols) * GRID,
+                                  "Y": (int(rows.max()) + 1) * GRID, "z": h_o, "H": base - spacer_t - h_o,
+                                  "over": b["id"], "under": placed[o]["id"] if o >= 0 else "floor"})
+            hmap[s0:s1, 0:Y] = np.maximum(hmap[s0:s1, 0:Y], base)   # 받침 윗면도 다음 칸이 쓸 수 있다
+        hmap[x0:x0 + X, 0:Y] = base + Z
+        top[x0:x0 + X, 0:Y] = i
+        placed.append({**b, "pos": [x0 * GRID, -d["Y"], base],
+                       "supports": [placed[o]["id"] if o >= 0 else "floor" for o, *_ in legs]})
+    return placed, parts
+
 def write_assembly(placed, path):
     lines = [
         "// layout.py가 만든 파일. 수정은 books.json에서.",
@@ -233,6 +318,9 @@ def main():
     ap.add_argument("--assembly", default=str(HERE / "assembly.scad"))
     ap.add_argument("--skeletal", action="store_true", help="골조형 모듈 (윗판·바닥판·뒷벽에 갈빗대만)")
     ap.add_argument("--bond", action="store_true", help="엇쌓기: 위 칸은 아래 칸 두 개 이상에 걸친다")
+    ap.add_argument("--spacer", action="store_true", help="스페이서 받침: 위 칸마다 계단형 받침으로 두 칸 이상을 묶는다")
+    ap.add_argument("--max-leg", type=int, default=120, help="스페이서 다리 최대 길이 (mm)")
+    ap.add_argument("--target", type=int, help="이 폭 안을 먼저 채운다 (mm, 벽에 쓸 수 있는 폭)")
     ap.add_argument("--max-shim", type=int, default=40, help="괴임 블록 최대 높이 (mm)")
     ap.add_argument("--deep-min", type=float, default=0.75, help="받침이 덮어야 할 깊이 비율")
     ap.add_argument("--weight-ratio", type=float, default=0.5, help="엇쌓기: 받치는 칸의 최소 무게 비율")
@@ -250,7 +338,10 @@ def main():
             b["dims"] = d
 
     shims = []
-    if args.bond:
+    if args.spacer:
+        placed, shims = place_spacer(books, args.width, args.max_height, not args.no_heavy_low,
+                                     max_leg=args.max_leg, target_mm=args.target)
+    elif args.bond:
         placed, shims = place_bond(books, args.width, args.max_height, not args.no_heavy_low,
                                    args.max_shim, deep_min=args.deep_min, weight_ratio=args.weight_ratio)
     else:
@@ -259,7 +350,7 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     (out / "layout.json").write_text(json.dumps(
         {"grid": GRID, "max_height": args.max_height, "heavy_low": not args.no_heavy_low,
-         "bond": args.bond, "books": placed, "shims": shims}, ensure_ascii=False, indent=1))
+         "bond": args.bond or args.spacer, "spacer": args.spacer, "books": placed, "shims": shims}, ensure_ascii=False, indent=1))
     write_assembly(placed, Path(args.assembly))
 
     for p in placed:
@@ -274,7 +365,13 @@ def main():
     com = sum(p["kg"] * (p["pos"][2] + p["dims"]["Z"] / 2) for p in placed) / kg
     print(f"전체 폭 {xmax:.0f} mm, 높이 {zmax:.0f} mm, 책 무게 합 {kg:.1f} kg, "
           f"책 무게중심 높이 {com:.0f} mm")
-    if args.bond:
+    if args.spacer:
+        ups = [p for p in placed if p["pos"][2] > 0]
+        legs = [s for s in shims if s["kind"] == "leg"]
+        vol = sum(s["X"] * s["Y"] * s["H"] for s in shims) / 1000
+        print(f"위 칸 {len(ups)}개 모두 스페이서로 두 칸 이상에 걸침, 스페이서 {len(ups)}개 "
+              f"(다리 {len(legs)}개, 다리 최대 {max([s['H'] for s in legs] or [0])} mm, 꽉 채운 부피 {vol:.0f} cm³)")
+    elif args.bond:
         ups = [p for p in placed if p["pos"][2] > 0]
         print(f"위 칸 {len(ups)}개 모두 두 칸 이상에 걸침, 괴임 {len(shims)}개 "
               f"(높이 {sorted(set(s['H'] for s in shims))} mm)")
