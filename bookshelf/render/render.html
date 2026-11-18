@@ -14,7 +14,7 @@
            background: rgba(243,240,234,.9); padding: 3px 6px; border-left: 2px solid var(--ink); }
   .label b { font-weight: 700; }
   .label.accent { border-left-color: var(--accent); }
-  .cap { position: absolute; font-size: 15px; font-weight: 700; letter-spacing: .02em; }
+  .cap { position: absolute; font-size: 15px; font-weight: 700; letter-spacing: .02em; white-space: nowrap; }
   .sub { position: absolute; font-size: 13px; color: var(--muted); }
 </style>
 <script type="importmap">
@@ -28,6 +28,11 @@
 <script type="module">
 import * as THREE from 'three';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { SSAOPass } from 'three/addons/postprocessing/SSAOPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
 const P = new URLSearchParams(location.search);
 const VIEW = P.get('view') || 'hero';
@@ -47,19 +52,27 @@ const OUT = P.get('out') || 'out';
 const layout = await (await fetch(`../${OUT}/layout.json`)).json();
 const loader = new STLLoader();
 const cache = new Map();
-const stl = name => {
-  if (!cache.has(name)) cache.set(name, loader.loadAsync(`../${OUT}/stl/${name}.stl`));
-  return cache.get(name);
+const STLDIR = P.get('stl') || 'stl';                // 골조형: ?stl=stl_skel&skel=1
+const stl = (name, dir = STLDIR) => {
+  const key = dir + '/' + name;
+  if (!cache.has(key)) cache.set(key, loader.loadAsync(`../${OUT}/${dir}/${name}.stl`));
+  return cache.get(key);
 };
+const STUDIO = P.get('look') === 'studio';
 // 칸 기준 치수: 눕힌 책은 두께가 위아래, 높이가 좌우
 const eff = b => (b.lay ? { T: b.h, HH: b.t } : { T: b.t, HH: b.h });
 const std = (color, roughness = 0.8) =>
   new THREE.MeshStandardMaterial({ color, roughness, metalness: 0 });
+// 스튜디오 모드의 PETG: 살짝 반광
+const petg = () => STUDIO
+  ? new THREE.MeshPhysicalMaterial({ color: 0xEFECE6, roughness: 0.46, clearcoat: 0.18, clearcoatRoughness: 0.55 })
+  : std(COL.module, 0.72);
 const shadowAll = o => o.traverse(m => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
 
 // 책: 표지·책등은 표지색, 위아래·앞마구리는 종이색. 책등에 제목 띠.
 function bookMesh(b) {
-  const cover = std(new THREE.Color(P.get('bookColor') ? '#' + P.get('bookColor') : b.color), 0.55),
+  const cover = std(new THREE.Color(P.get('bookColor') ? '#' + P.get('bookColor') : b.color),
+                    STUDIO ? (b.kind === 'art' ? 0.38 : 0.68) : 0.55),
         pages = std(COL.pages, 0.95);
   // BoxGeometry 면 순서: +x, -x, +y(벽 쪽 = 앞마구리), -y(책등), +z, -z
   const { T, HH } = eff(b);
@@ -82,17 +95,23 @@ function bookMesh(b) {
 
 // 모듈 하나 (모듈 좌표계: x 두께, y 깊이(0=앞), z 위)
 async function makeUnit(b, ex = {}) {
-  const d = b.dims, u = new THREE.Group();
+  const d = b.dims, u = new THREE.Group(), dir = ex.dir || STLDIR, skel = ex.skel ?? !!P.get('skel');
   const add = (geo, mat, pos = [0, 0, 0]) => {
     const m = new THREE.Mesh(geo, mat); m.position.set(...pos);
     m.castShadow = m.receiveShadow = true; u.add(m); return m;
   };
-  add(await stl(`${b.id}_module`), std(COL.module, 0.72));
+  add(await stl(`${b.id}_module`, dir), petg());
+  if (ex.frameOnly) return u;
   const bo = ex.book || [0, 0, 0];
-  add(await stl(`${b.id}_shoe`), std(COL.shoe, 0.7), bo);
-  add(await stl(`${b.id}_wedge`), std(COL.wedge, 0.55), ex.wedge || [0, 0, 0]);
-  add(new THREE.BoxGeometry(d.cav, b.w, C.pad), std(COL.pad, 0.95),
-      [d.sx + d.cav / 2, b.w / 2, d.Z - C.top_t - C.pad / 2]);
+  add(await stl(`${b.id}_shoe`, dir), std(COL.shoe, 0.7), bo);
+  add(await stl(`${b.id}_wedge`, dir), std(COL.wedge, 0.55), ex.wedge || [0, 0, 0]);
+  if (skel) {                                         // 골조형: 패드는 표지 판 위 두 줄
+    const pw = C.clear_t + 2.5 + 2;
+    for (const x0 of [d.sx, d.X - pw])
+      add(new THREE.BoxGeometry(pw, b.w, C.pad), std(COL.pad, 0.95), [x0 + pw / 2, b.w / 2, d.Z - C.top_t - C.pad / 2]);
+  } else
+    add(new THREE.BoxGeometry(d.cav, b.w, C.pad), std(COL.pad, 0.95),
+        [d.sx + d.cav / 2, b.w / 2, d.Z - C.top_t - C.pad / 2]);
   if (!ex.noBook) {
     const { T, HH } = eff(b);
     const bk = bookMesh(b);
@@ -125,7 +144,8 @@ function addRoom(scene, withWall = true) {
 }
 
 function addLights(scene, box, dir, strength = 2.4) {
-  scene.add(new THREE.HemisphereLight(0xFFFFFF, 0xD6CFC4, 1.15));
+  if (STUDIO) strength *= +(P.get('key') || 0.62);
+  scene.add(new THREE.HemisphereLight(0xFFFFFF, 0xD6CFC4, STUDIO ? +(P.get('hemi') || 0.3) : 1.15));
   const c = box.getCenter(new THREE.Vector3()), s = box.getSize(new THREE.Vector3());
   const R = Math.max(s.x, s.y, s.z);
   const sun = new THREE.DirectionalLight(0xFFF8EE, strength);
@@ -138,7 +158,7 @@ function addLights(scene, box, dir, strength = 2.4) {
   cam.near = R * 0.5; cam.far = R * 6;
   sun.shadow.bias = -0.0002; sun.shadow.normalBias = 0.6;
   scene.add(sun, sun.target);
-  const fill = new THREE.DirectionalLight(0xE8EEF5, 0.45);
+  const fill = new THREE.DirectionalLight(0xE8EEF5, STUDIO ? 0.15 : 0.45);
   fill.position.copy(c).add(new THREE.Vector3(1, 0.4, 0.8).multiplyScalar(R * 3));
   scene.add(fill);
 }
@@ -223,7 +243,7 @@ async function shelfScene(books) {
   const scene = new THREE.Scene(); scene.background = new THREE.Color(COL.bg);
   const world = worldGroup(); scene.add(world);
   for (const b of books) {
-    const u = await makeUnit(b);
+    const u = await makeUnit(b, { frameOnly: !!P.get('frames') });
     u.position.set(...b.pos);
     world.add(u);
   }
@@ -252,7 +272,8 @@ if (VIEW === 'hero' || VIEW === 'front') {
     cam = new THREE.OrthographicCamera(-hw, hw, hh, -hh, 10, 20000);
     cam.position.set(c.x, c.y, 6000); cam.lookAt(c.x, c.y, 0);
   }
-  r.render(scene, cam);
+  if (STUDIO) { tighten(cam, box); studioEnv(r, scene, +(P.get('env') || 0.75)); }
+  renderFinal(r, scene, cam);
 }
 
 if (VIEW === 'detail') {
@@ -404,6 +425,129 @@ if (VIEW === 'print') {
     { at: [160, -150, 0], dx: 70, dy: 60, text: '<b>출력 범위</b> 330 × 320 — 바닥 면적 330 × 250 사용' },
     { at: [0, 0, 0], dx: -120, dy: 150, text: '<b>측벽 창</b> — 바닥에 닿는 면이라 그대로 뚫린다' },
   ], cam, { x: 0, y: 0, w: W, h: H }, g);
+}
+
+// ---------------- 스튜디오 렌더: 환경광, 접촉 그림자(AO), 사이클로라마 ----------------
+function studioEnv(r, scene, envI = 0.8) {
+  const pm = new THREE.PMREMGenerator(r);
+  scene.environment = pm.fromScene(new RoomEnvironment(), 0.04).texture;
+  scene.traverse(o => { if (o.isMesh) for (const m of [].concat(o.material)) { m.envMapIntensity = envI; m.needsUpdate = true; } });
+}
+function tighten(cam, box) {
+  if (!cam.isPerspectiveCamera) return;
+  const c = box.getCenter(new THREE.Vector3()), d = cam.position.distanceTo(c), R = box.getSize(new THREE.Vector3()).length();
+  cam.near = Math.max(5, d - R * 1.5); cam.far = d + R * 3; cam.updateProjectionMatrix();
+}
+function renderFinal(r, scene, cam) {
+  if (!P.get('ao')) { r.render(scene, cam); return; }
+  const comp = new EffectComposer(r);
+  comp.setPixelRatio(window.devicePixelRatio); comp.setSize(W, H);
+  comp.addPass(new RenderPass(scene, cam));
+  const ao = new SSAOPass(scene, cam, W, H);
+  ao.kernelRadius = +(P.get('aoR') || 10); ao.minDistance = +(P.get('aoMin') || 0.0004); ao.maxDistance = +(P.get('aoMax') || 0.03);
+  comp.addPass(ao);
+  comp.addPass(new OutputPass());
+  comp.render();
+}
+// 바닥에서 벽으로 둥글게 이어지는 배경
+function coveGeometry(L, Zb, R, Hwall, Dfloor, N = 28) {
+  const prof = [[0, Dfloor]];
+  for (let i = 0; i <= N; i++) { const t = i / N * Math.PI / 2; prof.push([R - R * Math.cos(t), -Zb + R - R * Math.sin(t)]); }
+  prof.push([Hwall, -Zb]);
+  const pos = [], idx = [];
+  prof.forEach(([y, z], i) => { pos.push(-L, y, z, L, y, z); if (i) { const a = (i - 1) * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); } });
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals();
+  return g;
+}
+function addCove(scene, color = 0xE6E7E3, Zb = 900, R = 600) {
+  const m = new THREE.Mesh(coveGeometry(6000, Zb, R, 5000, 4000),
+    new THREE.MeshStandardMaterial({ color, roughness: 1, side: THREE.DoubleSide }));
+  m.receiveShadow = true; scene.add(m);
+}
+function tagUnder(text, obj, cam, dy = 16) {
+  const bx = new THREE.Box3().setFromObject(obj);
+  let x0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const x of [bx.min.x, bx.max.x]) for (const y of [bx.min.y, bx.max.y]) for (const z of [bx.min.z, bx.max.z]) {
+    const p = new THREE.Vector3(x, y, z).project(cam);
+    const sx = (p.x + 1) / 2 * W, sy = (1 - p.y) / 2 * H;
+    x0 = Math.min(x0, sx); x1 = Math.max(x1, sx); y1 = Math.max(y1, sy);
+  }
+  const el = document.createElement('div');
+  el.className = 'cap'; el.innerHTML = text;
+  el.style.left = ((x0 + x1) / 2) + 'px'; el.style.top = (y1 + dy) + 'px'; el.style.transform = 'translateX(-50%)';
+  document.getElementById('stage').appendChild(el);
+}
+function tag(text, at, group, cam, dy = 0) {
+  group.updateMatrixWorld(true);
+  const p = new THREE.Vector3(...at).applyMatrix4(group.matrixWorld).project(cam);
+  const el = document.createElement('div');
+  el.className = 'cap'; el.innerHTML = text;
+  el.style.left = ((p.x + 1) / 2 * W) + 'px'; el.style.top = ((1 - p.y) / 2 * H + dy) + 'px';
+  el.style.transform = 'translateX(-50%)';
+  document.getElementById('stage').appendChild(el);
+}
+
+// 같은 책, 판(A)과 골조(B)를 나란히
+if (VIEW === 'skelmod') {
+  const r = makeRenderer();
+  const b = layout.books.find(x => x.id === (P.get('id') || '11')), d = b.dims;
+  const empty = !!P.get('empty'), gap = +(P.get('gap') || 150);
+  const scene = new THREE.Scene(); scene.background = new THREE.Color(0xE6E7E3);
+  const g = worldGroup(); scene.add(g);
+  const A = await makeUnit(b, { dir: 'stl', skel: false, frameOnly: empty });
+  const B = await makeUnit(b, { dir: 'stl_skel', skel: true, frameOnly: empty });
+  A.position.set(-d.X - gap / 2, -d.Y / 2, 0); B.position.set(gap / 2, -d.Y / 2, 0);
+  g.add(A, B);
+  addCove(scene);
+  const box = new THREE.Box3().setFromObject(g);
+  addLights(scene, box, [-0.75, 1.35, 0.85], 2.6);
+  const dir = (P.get('dir') || '0.62,0.48,1').split(',').map(Number);
+  const cam = perspective(box, dir, +(P.get('fov') || 20), +(P.get('margin') || 0.78));
+  tighten(cam, box);
+  studioEnv(r, scene, +(P.get('env') || 0.8));
+  renderFinal(r, scene, cam);
+  g.updateMatrixWorld(true);
+  tagUnder('A · 판', A, cam); tagUnder('B · 골조', B, cam);
+}
+
+// 강한 햇빛: 골조 사이로 떨어지는 그림자
+if (VIEW === 'sun') {
+  const r = makeRenderer();
+  r.shadowMap.type = THREE.PCFShadowMap;
+  const { scene, box } = await shelfScene(layout.books);
+  const c = box.getCenter(new THREE.Vector3()), s = box.getSize(new THREE.Vector3()), R = s.length();
+  scene.add(new THREE.HemisphereLight(0xEAF0F6, 0xD6CFC4, 0.22));
+  const sun = new THREE.DirectionalLight(0xFFF1DC, 3.4);
+  const sd = (P.get('sun') || '-0.9,0.95,0.6').split(',').map(Number);
+  sun.position.copy(c).add(new THREE.Vector3(...sd).normalize().multiplyScalar(R * 2.5));
+  sun.target.position.copy(c); sun.castShadow = true; sun.shadow.mapSize.set(4096, 4096);
+  const sc = sun.shadow.camera; sc.left = sc.bottom = -R; sc.right = sc.top = R; sc.near = R * 0.5; sc.far = R * 5;
+  sun.shadow.bias = -0.00015; sun.shadow.normalBias = 0.4;
+  scene.add(sun, sun.target);
+  const dir = (P.get('dir') || '0.5,0.25,1').split(',').map(Number);
+  const view = box.clone(); view.expandByScalar(+(P.get('pad') || 120));
+  const cam = perspective(view, dir, +(P.get('fov') || 26), +(P.get('margin') || 0.86));
+  tighten(cam, view);
+  studioEnv(r, scene, +(P.get('env') || 0.3));
+  renderFinal(r, scene, cam);
+}
+
+// 쌓인 이음부 확대
+if (VIEW === 'close') {
+  const r = makeRenderer();
+  const { scene, world, box } = await shelfScene(layout.books);
+  const id = P.get('id');
+  const idx = layout.books.findIndex(b => b.id === id);
+  const focus = new THREE.Box3().setFromObject(world.children[idx]);
+  focus.expandByVector(new THREE.Vector3(+(P.get('ex') || 60), +(P.get('ey') || 60), 0));
+  focus.min.y -= +(P.get('below') || 120);
+  addLights(scene, box, [-0.8, 1.2, 0.9], 2.4);
+  const dir = (P.get('dir') || '0.7,0.35,1').split(',').map(Number);
+  const cam = perspective(focus, dir, +(P.get('fov') || 18), +(P.get('margin') || 0.95));
+  tighten(cam, focus);
+  studioEnv(r, scene, +(P.get('env') || 0.8));
+  renderFinal(r, scene, cam);
 }
 
 window.__done = true;

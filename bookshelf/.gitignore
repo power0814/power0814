@@ -3,3 +3,4 @@ out_lay/stl/
 render/node_modules/
 render/package-lock.json
 __pycache__/
+out/stl_skel/

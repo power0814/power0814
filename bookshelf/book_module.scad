@@ -19,6 +19,7 @@ book_t = 22;         // 두께 (= 책등 폭)
 idx    = "07";       // 앞면 각인 (번호)
 note   = "2026.11";  // 측면 각인 (입고일)
 lay    = false;      // 눕혀 꽂기: 책등은 앞, 두께가 위아래 (가로형·큰 판형)
+skeletal = false;    // 골조형: 윗판·바닥판·뒷벽을 갈빗대만 남기고 비운다
 
 /* [출력할 부품] */
 part = "preview";    // [preview, module, shoe, wedge, pin]
@@ -38,6 +39,9 @@ wedge_front = 8;     // 쐐기 앞쪽 높이 (뒤쪽은 drop)
 shoe_tab    = 8;     // 받침 손잡이가 앞으로 나온 길이
 wedge_tab   = 16;    // 쐐기 손잡이가 앞으로 나온 길이
 rail        = 12;    // 측벽 창 둘레 테두리 폭
+rail_skel   = 9;     // 골조형일 때 측벽 테두리 폭
+rib         = 10;    // 골조형 갈빗대 폭
+rib_pitch   = 40;    // 갈빗대 간격: 벽에서 20, 60, 100 … (핀 줄과 겹친다)
 pin_d       = 4;     // 연결 핀 지름
 pin_depth   = 3;     // 핀 구멍 깊이 (판마다)
 pin_rows    = [20, 100];        // 핀 줄: 벽에서 떨어진 거리
@@ -79,6 +83,7 @@ module shelf_module(h, w, t, idx = "", note = "", dimstr = undef) {
             side_frame(Y, Z, sx, by, pz);                      // 닫힌 측벽 (x = 0 쪽만)
         }
         pin_holes(X, Y, Z);
+        if (skeletal) skeleton_cuts(X, Y, Z, d[3], d[4], d[5], d[6]);
         keyhole(X, Y, Z, by);
         labels(X, Y, pz, is_undef(dimstr) ? str(h, "x", w, "x", t) : dimstr, idx, note);
     }
@@ -86,6 +91,7 @@ module shelf_module(h, w, t, idx = "", note = "", dimstr = undef) {
 
 // 측벽: 테두리만 남긴 틀. 창으로 책 표지가 보인다.
 module side_frame(Y, Z, sx, by, pz) {
+    rail = skeletal ? rail_skel : rail;
     wy = Y - by - 2 * rail;
     wz = Z - top_t - pz - 2 * rail;
     rotate([90, 0, 90]) linear_extrude(sx)
@@ -95,6 +101,34 @@ module side_frame(Y, Z, sx, by, pz) {
                 translate([rail, pz + rail])
                     offset(r = 5) offset(delta = -5) square([wy, wz]);
         }
+}
+
+// 골조형: 벽 기준 갈빗대 사이를 비운다. 구멍은 앞뒤 길이 30 mm 이하라
+// 눕혀 출력할 때(두께 방향이 위) 구멍 윗변이 다리처럼 건너간다.
+function rib_centers(Y) =
+    let(r = [for (dd = [20 : rib_pitch : Y - 10 - rib]) Y - dd]) [for (i = [len(r) - 1 : -1 : 0]) r[i]];
+function y_openings(Y, by) =
+    let(c = rib_centers(Y),
+        starts = concat([10], [for (x = c) x + rib / 2]),
+        ends   = concat([for (x = c) x - rib / 2], [Y - by]))
+    [for (i = [0 : len(starts) - 1]) if (ends[i] - starts[i] >= 8) [starts[i], ends[i]]];
+
+module skeleton_cuts(X, Y, Z, sx, by, pz, cav) {
+    lt = sx + 6; rt = X - 8;                          // 왼쪽 띠(측벽+표지 판), 오른쪽 띠(열린 쪽 표지 판)
+    kw = wedge_w(cav);
+    c0 = sx + cav / 2 - kw / 2 - 3; c1 = sx + cav / 2 + kw / 2 + 3;   // 바닥판 가운데 쐐기 길
+    for (o = y_openings(Y, by)) {
+        if (rt - lt >= 8)                              // 윗판
+            translate([lt, o[0], Z - top_t - 1]) cube([rt - lt, o[1] - o[0], top_t + 2]);
+        for (r = [[lt, c0], [c1, rt]]) if (r[1] - r[0] >= 8)   // 바닥판
+            translate([r[0], o[0], -1]) cube([r[1] - r[0], o[1] - o[0], pz + 2]);
+    }
+    zb = pz + 8; zt = Z - top_t - 28;                  // 뒷벽 (열쇠구멍 자리는 남김)
+    n = max(1, ceil((zt - zb + rib) / (30 + rib)));
+    seg = (zt - zb - (n - 1) * rib) / n;
+    if (rt - lt >= 8 && seg >= 8)
+        for (i = [0 : n - 1])
+            translate([lt, Y - by - 1, zb + i * (seg + rib)]) cube([rt - lt, by + 2, seg]);
 }
 
 // 위아래 모듈을 잇는 핀 구멍. 격자 위에 있어서 어떤 모듈끼리도 맞는다.

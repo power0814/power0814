@@ -25,6 +25,9 @@
   지금 규칙에서는 770 × 640 mm, 무게중심 211 mm다. 비교는 `renders/rule.png`.
 
 ![rule](renders/rule.png)
+- **골조형** (`skeletal = true`, `layout.py --skeletal`): 윗판·바닥판·뒷벽에 갈빗대만 남긴다. 갈빗대는 벽에서
+  20·60·100 mm … 40 mm 간격이라 위아래 칸의 갈빗대가 겹치고 핀 줄도 그 위에 온다. 구멍 길이는 30 mm 이하라
+  눕혀 출력해도 지지대 없이 건너간다. 모듈 재료는 약 24 % 줄어든다. 비교 렌더는 `renders/skeletal/`.
 - **눕혀 꽂기**: 책마다 `"lay": true`를 주면 책등은 앞을 향한 채 두께가 위아래가 된다 (큰 판형 보관용).
 
 ![silhouette](renders/silhouette.png)

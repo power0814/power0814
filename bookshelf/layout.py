@@ -40,6 +40,7 @@ def scad_args(b, part):
         "-D", f"book_h={b['h']}", "-D", f"book_w={b['w']}", "-D", f"book_t={b['t']}",
         "-D", f'idx="{b["id"]}"', "-D", f'note="{b["date"]}"', "-D", f'part="{part}"',
         "-D", f"lay={'true' if b.get('lay') else 'false'}",
+        "-D", f"skeletal={'true' if b.get('skeletal') else 'false'}",
     ]
 
 
@@ -159,6 +160,7 @@ def main():
     ap.add_argument("--no-heavy-low", action="store_true", help="무게 규칙(4번)을 끈다")
     ap.add_argument("--lay-landscape", action="store_true", help="가로형(w > h) 책을 모두 눕혀 꽂는다")
     ap.add_argument("--assembly", default=str(HERE / "assembly.scad"))
+    ap.add_argument("--skeletal", action="store_true", help="골조형 모듈 (윗판·바닥판·뒷벽에 갈빗대만)")
     args = ap.parse_args()
 
     books = json.loads(Path(args.books).read_text())["books"]
@@ -166,6 +168,8 @@ def main():
         if args.lay_landscape and b["w"] > b["h"]:
             b["lay"] = True
         b["kg"] = round(book_kg(b), 2)
+        if args.skeletal:
+            b["skeletal"] = True
     with ThreadPoolExecutor(args.jobs) as ex:
         for b, d in zip(books, ex.map(module_dims, books)):
             b["dims"] = d
