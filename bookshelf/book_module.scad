@@ -18,6 +18,7 @@ book_w = 165;        // 너비 (= 칸 깊이)
 book_t = 22;         // 두께 (= 책등 폭)
 idx    = "07";       // 앞면 각인 (번호)
 note   = "2026.11";  // 측면 각인 (입고일)
+lay    = false;      // 눕혀 꽂기: 책등은 앞, 두께가 위아래 (가로형·큰 판형)
 
 /* [출력할 부품] */
 part = "preview";    // [preview, module, shoe, wedge, pin]
@@ -66,7 +67,8 @@ function fits_bed(d) =
 
 // ------------------------------------------------------------
 // 모듈 본체
-module shelf_module(h, w, t, idx = "", note = "") {
+// h, w, t는 칸 기준 (h = 위아래, t = 좌우). 눕힌 책은 호출할 때 h와 t를 바꿔 넣는다.
+module shelf_module(h, w, t, idx = "", note = "", dimstr = undef) {
     d = dims(h, w, t);
     X = d[0]; Y = d[1]; Z = d[2]; sx = d[3]; by = d[4]; pz = d[5];
     difference() {
@@ -78,7 +80,7 @@ module shelf_module(h, w, t, idx = "", note = "") {
         }
         pin_holes(X, Y, Z);
         keyhole(X, Y, Z, by);
-        labels(X, Y, pz, h, w, t, idx, note);
+        labels(X, Y, pz, is_undef(dimstr) ? str(h, "x", w, "x", t) : dimstr, idx, note);
     }
 }
 
@@ -118,13 +120,13 @@ module keyhole(X, Y, Z, by) {
 }
 
 // 앞면: 번호 / 닫힌 측면: 번호·입고일·책 치수
-module labels(X, Y, pz, h, w, t, idx, note) {
+module labels(X, Y, pz, dimstr, idx, note) {
     if (pz >= 6 && X >= 14)
         translate([X / 2, 0.6, pz / 2]) rotate([90, 0, 0]) linear_extrude(1)
             text(idx, size = min(pz - 2.5, (X - 4) / 1.4, 7), font = font,
                  halign = "center", valign = "center");
     translate([0.6, Y / 2, pz / 2]) rotate([90, 0, -90]) linear_extrude(1)
-        text(str(idx, "  ", note, "  ", h, "x", w, "x", t),
+        text(str(idx, "  ", note, "  ", dimstr),
              size = min(pz - 2.5, 4), font = font, halign = "center", valign = "center");
 }
 
@@ -151,20 +153,28 @@ module wedge(h, w, t) {
     }
 }
 
+// 받침: 넓은 받침(눕힌 책)은 테두리·가운데 띠·가로 리브만 남기고 비운다
 module shoe(h, w, t) {
     d = dims(h, w, t); sx = d[3]; pz = d[5]; cav = d[6];
+    x0 = sx + 0.3; x1 = sx + cav - 0.3;
+    kw = wedge_w(cav); c0 = sx + cav / 2 - kw / 2 - 6; c1 = sx + cav / 2 + kw / 2 + 6;
+    nseg = max(1, round((w - 16) / 70));
+    seg = (w - 16 - (nseg - 1) * 8) / nseg;
     difference() {
-        translate([sx + 0.3, -shoe_tab, pz + drop]) cube([cav - 0.6, w + shoe_tab, lift - drop]);
+        translate([x0, -shoe_tab, pz + drop]) cube([x1 - x0, w + shoe_tab, lift - drop]);
         wedge_solid(h, w, t, grow = 0.3);
+        for (p = [[x0 + 8, c0], [c1, x1 - 8]], i = [0 : nseg - 1])
+            if (p[1] - p[0] >= 15)
+                translate([p[0], 8 + i * (seg + 8), pz]) cube([p[1] - p[0], seg, lift + 1]);
     }
 }
 
 module pin() { cylinder(d = pin_d, h = 2 * pin_depth - 0.4); }
 
-// 미리보기: 모듈 + 받침 + 쐐기 + 패드 + 책
-module preview(h, w, t, idx = "", note = "", book_color = "#3E5C76") {
+// 미리보기: 모듈 + 받침 + 쐐기 + 패드 + 책 (h, w, t는 칸 기준)
+module preview(h, w, t, idx = "", note = "", book_color = "#3E5C76", dimstr = undef) {
     d = dims(h, w, t); X = d[0]; Z = d[2]; sx = d[3]; pz = d[5]; cav = d[6];
-    color("#ECE7DF") shelf_module(h, w, t, idx, note);
+    color("#ECE7DF") shelf_module(h, w, t, idx, note, dimstr);
     color("#8E8780") shoe(h, w, t);
     color("#C9663D") wedge(h, w, t);
     color("#B48A5A") translate([sx, 0, Z - top_t - pad]) cube([cav, w, pad]);
@@ -172,12 +182,17 @@ module preview(h, w, t, idx = "", note = "", book_color = "#3E5C76") {
 }
 
 // ------------------------------------------------------------
-D = dims(book_h, book_w, book_t);
+// 칸 기준 치수: 눕히면 책 두께가 위아래, 책 높이가 좌우가 된다
+CH = lay ? book_t : book_h;
+CT = lay ? book_h : book_t;
+DS = str(book_h, "x", book_w, "x", book_t, lay ? " L" : "");
+
+D = dims(CH, book_w, CT);
 echo(str("DIMS ", D[0], " ", D[1], " ", D[2], " ", D[3], " ", D[4], " ", D[5], " ", D[6]));
 echo(str("FITS_BED ", fits_bed(D)));
 
-if      (part == "preview") preview(book_h, book_w, book_t, idx, note);
-else if (part == "module")  shelf_module(book_h, book_w, book_t, idx, note);
-else if (part == "shoe")    shoe(book_h, book_w, book_t);
-else if (part == "wedge")   wedge(book_h, book_w, book_t);
+if      (part == "preview") preview(CH, book_w, CT, idx, note, dimstr = DS);
+else if (part == "module")  shelf_module(CH, book_w, CT, idx, note, DS);
+else if (part == "shoe")    shoe(CH, book_w, CT);
+else if (part == "wedge")   wedge(CH, book_w, CT);
 else if (part == "pin")     pin();

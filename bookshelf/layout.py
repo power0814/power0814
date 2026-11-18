@@ -33,6 +33,7 @@ def scad_args(b, part):
     return [
         "-D", f"book_h={b['h']}", "-D", f"book_w={b['w']}", "-D", f"book_t={b['t']}",
         "-D", f'idx="{b["id"]}"', "-D", f'note="{b["date"]}"', "-D", f'part="{part}"',
+        "-D", f"lay={'true' if b.get('lay') else 'false'}",
     ]
 
 
@@ -87,13 +88,15 @@ def write_assembly(placed, path):
         "// layout.py가 만든 파일. 수정은 books.json에서.",
         "use <book_module.scad>",
         "",
-        "color(\"#D9D6D0\") translate([-60, 0, -1]) cube([1000, 10, 1400]);   // 벽",
+        "color(\"#D9D6D0\") translate([-60, 0, -1]) cube([1600, 10, 1400]);   // 벽",
     ]
     for p in placed:
         x, y, z = p["pos"]
+        ch, ct = (p["t"], p["h"]) if p.get("lay") else (p["h"], p["t"])   # 칸 기준 높이·두께
         lines.append(
-            f'translate([{x}, {y}, {z}]) preview({p["h"]}, {p["w"]}, {p["t"]}, '
+            f'translate([{x}, {y}, {z}]) preview({ch}, {p["w"]}, {ct}, '
             f'"{p["id"]}", "{p["date"]}", "{p["color"]}");  // {p["label"]}'
+            + (" (눕힘)" if p.get("lay") else "")
         )
     path.write_text("\n".join(lines) + "\n")
 
@@ -121,9 +124,14 @@ def main():
     ap.add_argument("--out", default=str(HERE / "out"))
     ap.add_argument("--stl", help="STL을 내보낼 폴더")
     ap.add_argument("--jobs", type=int, default=4)
+    ap.add_argument("--lay-landscape", action="store_true", help="가로형(w > h) 책을 모두 눕혀 꽂는다")
+    ap.add_argument("--assembly", default=str(HERE / "assembly.scad"))
     args = ap.parse_args()
 
     books = json.loads(Path(args.books).read_text())["books"]
+    for b in books:
+        if args.lay_landscape and b["w"] > b["h"]:
+            b["lay"] = True
     with ThreadPoolExecutor(args.jobs) as ex:
         for b, d in zip(books, ex.map(module_dims, books)):
             b["dims"] = d
@@ -133,11 +141,12 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     (out / "layout.json").write_text(json.dumps({"grid": GRID, "books": placed},
                                                 ensure_ascii=False, indent=1))
-    write_assembly(placed, HERE / "assembly.scad")
+    write_assembly(placed, Path(args.assembly))
 
     for p in placed:
         d = p["dims"]
         flag = "" if d["fits_bed"] else "  ← 출력 범위 초과, 나눠 뽑아야 함"
+        flag += "  (눕힘)" if p.get("lay") else ""
         print(f'{p["id"]} {p["label"]:<18} 책 {p["h"]}x{p["w"]}x{p["t"]}  '
               f'모듈 {d["X"]:.0f}x{d["Y"]:.0f}x{d["Z"]:.0f}  위치 x={p["pos"][0]} z={p["pos"][2]}{flag}')
     xmax = max(p["pos"][0] + p["dims"]["X"] for p in placed)

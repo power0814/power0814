@@ -24,13 +24,15 @@
 <script type="module">
 const P = new URLSearchParams(location.search);
 const FIG = P.get('fig') || 'silhouette';
-const layout = await (await fetch('../out/layout.json')).json();
-const books = layout.books;
+const OUT = P.get('out') || 'out';
 const NS = 'http://www.w3.org/2000/svg';
+const load = async dir => (await (await fetch(`../${dir}/layout.json`)).json()).books;
+const landscape = b => b.w > b.h;
 
-const rects = books.map(b => ({ id: b.id, x: b.pos[0], z: b.pos[2], X: b.dims.X, Z: b.dims.Z, b }));
-const totalW = Math.max(...rects.map(r => r.x + r.X));
-const totalH = Math.max(...rects.map(r => r.z + r.Z));
+function rectsOf(books) {
+  const rects = books.map(b => ({ id: b.id, x: b.pos[0], z: b.pos[2], X: b.dims.X, Z: b.dims.Z, b }));
+  return { rects, W: Math.max(...rects.map(r => r.x + r.X)), H: Math.max(...rects.map(r => r.z + r.Z)) };
+}
 
 function svg(w, h) {
   const s = document.createElementNS(NS, 'svg');
@@ -46,16 +48,16 @@ const el = (parent, tag, attrs, txt) => {
 };
 
 // 정면 실루엣: 모듈 앞면 사각형. 이음매는 배경색 선으로.
-function silhouette(g, list, ox, gy, s, opts = {}) {
+function silhouette(g, list, width, ox, gy, s, opts = {}) {
   for (const r of list) {
     const fill = opts.fill ? opts.fill(r) : 'var(--ink)';
     el(g, 'rect', { x: ox + r.x * s, y: gy - (r.z + r.Z) * s, width: r.X * s, height: r.Z * s,
                     fill, stroke: 'var(--bg)', 'stroke-width': opts.joint ?? 1.4 });
-    if (opts.numbers)
-      el(g, 'text', { x: ox + (r.x + r.X / 2) * s, y: gy - (r.z + r.Z) * s + 15,
+    if (opts.numbers && r.Z * s > 18)
+      el(g, 'text', { x: ox + (r.x + r.X / 2) * s, y: gy - (r.z + r.Z) * s + 14,
                       'text-anchor': 'middle', class: 'num' }, r.id);
   }
-  el(g, 'line', { x1: ox - 60, x2: ox + totalW * s + 60, y1: gy + 0.7, y2: gy + 0.7,
+  el(g, 'line', { x1: ox - 60, x2: ox + width * s + 60, y1: gy + 0.7, y2: gy + 0.7,
                   stroke: 'var(--ink)', 'stroke-width': 1.4 });
 }
 
@@ -78,50 +80,76 @@ function scaleBar(g, x, y, s) {
 }
 
 if (FIG === 'silhouette') {
-  const W = 1600, H = 1100, s = 820 / totalH;
+  const books = await load(OUT), { rects, W: tw, H: th } = rectsOf(books);
+  const W = 1600, H = 1160, s = Math.min(860 / th, 560 / tw);
   const g = svg(W, H);
   el(g, 'text', { x: 64, y: 78, class: 't1' }, '장서의 실루엣 — 정면도');
   el(g, 'text', { x: 64, y: 106, class: 't2' },
-     `예시 장서 ${books.length}권 · 한 칸에 한 권 · 바깥 치수 10 mm 격자 · 들어온 순서대로 쌓음`);
-  const ox = 150, gy = 1010;
-  silhouette(g, rects, ox, gy, s, { numbers: true });
-  dimH(g, ox, ox + totalW * s, gy + 34, `${totalW}`);
-  dimV(g, ox + totalW * s + 40, gy, gy - totalH * s, `${totalH}`);
-  scaleBar(g, ox + totalW * s + 120, gy - 6, s);
+     `예시 장서 ${books.length}권 · 한 칸에 한 권 · 바깥 치수 10 mm 격자 · 들어온 순서대로 쌓음 · 주황 = 가로형`);
+  const ox = 150, gy = 1070;
+  silhouette(g, rects, tw, ox, gy, s, { numbers: true,
+    fill: r => (landscape(r.b) ? 'var(--accent)' : 'var(--ink)') });
+  dimH(g, ox, ox + tw * s, gy + 34, `${tw}`);
+  dimV(g, ox + tw * s + 40, gy, gy - th * s, `${th}`);
+  scaleBar(g, ox + tw * s + 120, gy - 6, s);
 
-  // 범례
   const lx = 860; let ly = 170;
   el(g, 'text', { x: lx, y: ly - 26, class: 'cap' }, '번호 · 책 · 책 치수(높이×너비×두께) · 입고일');
+  el(g, 'text', { x: lx + 460, y: ly - 26, class: 'capm' }, '모듈');
   el(g, 'line', { x1: lx, x2: lx + 680, y1: ly - 14, y2: ly - 14, stroke: 'var(--rule)' });
   for (const b of books) {
     el(g, 'rect', { x: lx, y: ly - 11, width: 14, height: 14, fill: b.color, stroke: '#00000022' });
     el(g, 'text', { x: lx + 26, y: ly + 1, class: 'legm' }, b.id);
-    el(g, 'text', { x: lx + 56, y: ly + 1, class: 'leg' }, b.label);
+    el(g, 'text', { x: lx + 56, y: ly + 1, class: 'leg', fill: landscape(b) ? '#A9502E' : 'var(--ink)' },
+       b.label + (b.lay ? ' (눕힘)' : ''));
     el(g, 'text', { x: lx + 330, y: ly + 1, class: 'legm' }, `${b.h}×${b.w}×${b.t}`);
     el(g, 'text', { x: lx + 460, y: ly + 1, class: 'legm' }, `→ ${b.dims.X}×${b.dims.Y}×${b.dims.Z}`);
     el(g, 'text', { x: lx + 610, y: ly + 1, class: 'legm' }, b.date);
-    ly += 33;
+    ly += Math.min(33, 880 / books.length);
   }
-  el(g, 'text', { x: lx + 460, y: 144, class: 'capm' }, '모듈');
 }
 
 if (FIG === 'growth') {
-  const W = 1800, H = 900, s = 600 / totalH;
+  const books = await load(OUT), { rects, W: tw, H: th } = rectsOf(books);
+  const W = 1800, H = 900, s = Math.min(600 / th, 340 / tw);
   const g = svg(W, H);
   el(g, 'text', { x: 64, y: 78, class: 't1' }, '자라는 순서');
   el(g, 'text', { x: 64, y: 106, class: 't2' },
      '새 책은 들어온 순서대로, 지금 형태에서 가장 낮고 아래 모듈이 받쳐 주는 자리에 놓인다. 주황 = 직전 단계 이후 들어온 책');
-  const steps = [6, 11, 16, books.length];
+  const n = books.length, steps = [Math.round(n / 4), Math.round(n / 2), Math.round(3 * n / 4), n];
   const gy = 790, panel = (W - 128) / steps.length;
-  steps.forEach((n, i) => {
+  steps.forEach((k, i) => {
     const prev = i ? steps[i - 1] : 0;
-    const ox = 64 + i * panel + (panel - totalW * s) / 2;
-    silhouette(g, rects.slice(0, n), ox, gy, s, {
+    const ox = 64 + i * panel + (panel - tw * s) / 2;
+    silhouette(g, rects.slice(0, k), tw, ox, gy, s, {
       fill: r => (+r.id > prev ? 'var(--accent)' : 'var(--ink)'), joint: 1.2 });
-    const last = books[n - 1];
-    el(g, 'text', { x: ox + totalW * s / 2, y: gy + 40, 'text-anchor': 'middle', class: 'cap' }, `${n}권`);
-    el(g, 'text', { x: ox + totalW * s / 2, y: gy + 62, 'text-anchor': 'middle', class: 'capm' }, `~ ${last.date}`);
+    el(g, 'text', { x: ox + tw * s / 2, y: gy + 40, 'text-anchor': 'middle', class: 'cap' }, `${k}권`);
+    el(g, 'text', { x: ox + tw * s / 2, y: gy + 62, 'text-anchor': 'middle', class: 'capm' }, `~ ${books[k - 1].date}`);
   });
+}
+
+// 같은 책, 같은 규칙: 가로형을 세우느냐 눕히느냐
+if (FIG === 'compare') {
+  const A = rectsOf(await load('out')), B = rectsOf(await load('out_lay'));
+  const W = 1800, H = 1000, gap = 180;
+  const s = Math.min(720 / Math.max(A.H, B.H), (W - 128 - gap - 120) / (A.W + B.W));
+  const g = svg(W, H);
+  el(g, 'text', { x: 64, y: 78, class: 't1' }, '가로형 책을 세우느냐, 눕히느냐');
+  el(g, 'text', { x: 64, y: 106, class: 't2' },
+     `같은 ${A.rects.length}권, 같은 쌓기 규칙. 주황 = 가로형 도록·아트북 ${A.rects.filter(r => landscape(r.b)).length}권`);
+  const gy = 880, fill = r => (landscape(r.b) ? 'var(--accent)' : 'var(--ink)');
+  const oxA = 124, oxB = oxA + A.W * s + gap;
+  silhouette(g, A.rects, A.W, oxA, gy, s, { fill, joint: 1.2 });
+  silhouette(g, B.rects, B.W, oxB, gy, s, { fill, joint: 1.2 });
+  dimV(g, oxA + A.W * s + 24, gy, gy - A.H * s, `${A.H}`);
+  dimH(g, oxA, oxA + A.W * s, gy + 30, `${A.W}`);
+  dimV(g, oxB + B.W * s + 24, gy, gy - B.H * s, `${B.H}`);
+  dimH(g, oxB, oxB + B.W * s, gy + 30, `${B.W}`);
+  el(g, 'text', { x: oxA, y: gy + 80, class: 'cap' }, 'A. 모두 세워 꽂기');
+  el(g, 'text', { x: oxA, y: gy + 102, class: 'capm' }, '탑이 된다. 가로형은 앞에서 보면 낮은 칸일 뿐, 깊이로 튀어나온다');
+  el(g, 'text', { x: oxB, y: gy + 80, class: 'cap' }, 'B. 가로형은 눕혀 꽂기');
+  el(g, 'text', { x: oxB, y: gy + 102, class: 'capm' }, '눕힌 책이 가장 낮은 바닥이 되어 그 위로 다른 칸이 올라간다. 기단 위에 기둥이 늘어선 형태');
+  scaleBar(g, W - 340, 150, s);
 }
 
 window.__done = true;

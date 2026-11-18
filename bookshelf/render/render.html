@@ -38,13 +38,16 @@ const C = { top_t: 4, pad: 1.5, clear_t: 0.6, lift: 10.5, pin_d: 4, pin_depth: 3
 const COL = { module: 0xECE7DF, shoe: 0x8E8780, wedge: 0xC9663D, pad: 0xB48A5A,
               pages: 0xF1EBDD, wall: 0xF7F5F1, floor: 0xD9D3C9, bg: 0xF3F0EA };
 
-const layout = await (await fetch('../out/layout.json')).json();
+const OUT = P.get('out') || 'out';
+const layout = await (await fetch(`../${OUT}/layout.json`)).json();
 const loader = new STLLoader();
 const cache = new Map();
 const stl = name => {
-  if (!cache.has(name)) cache.set(name, loader.loadAsync(`../out/stl/${name}.stl`));
+  if (!cache.has(name)) cache.set(name, loader.loadAsync(`../${OUT}/stl/${name}.stl`));
   return cache.get(name);
 };
+// 칸 기준 치수: 눕힌 책은 두께가 위아래, 높이가 좌우
+const eff = b => (b.lay ? { T: b.h, HH: b.t } : { T: b.t, HH: b.h });
 const std = (color, roughness = 0.8) =>
   new THREE.MeshStandardMaterial({ color, roughness, metalness: 0 });
 const shadowAll = o => o.traverse(m => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
@@ -53,14 +56,19 @@ const shadowAll = o => o.traverse(m => { if (m.isMesh) { m.castShadow = true; m.
 function bookMesh(b) {
   const cover = std(new THREE.Color(b.color), 0.55), pages = std(COL.pages, 0.95);
   // BoxGeometry 면 순서: +x, -x, +y(벽 쪽 = 앞마구리), -y(책등), +z, -z
+  const { T, HH } = eff(b);
   const g = new THREE.Group();
-  g.add(new THREE.Mesh(new THREE.BoxGeometry(b.t, b.w, b.h), [cover, cover, pages, cover, pages, pages]));
+  // 눕힌 책은 표지가 위아래(±z), 세운 책은 표지가 좌우(±x)
+  const faces = b.lay ? [pages, pages, pages, cover, cover, cover] : [cover, cover, pages, cover, pages, pages];
+  g.add(new THREE.Mesh(new THREE.BoxGeometry(T, b.w, HH), faces));
   const c = new THREE.Color(b.color);
   const lum = 0.3 * c.r + 0.59 * c.g + 0.11 * c.b;
+  const k = b.kind === 'art' ? 0.34 : 0.24, off = b.kind === 'art' ? 0.1 : 0.16;
   const band = new THREE.Mesh(
-    new THREE.BoxGeometry(Math.max(2, b.t * 0.55), 0.6, b.h * (b.kind === 'art' ? 0.34 : 0.24)),
+    b.lay ? new THREE.BoxGeometry(T * k, 0.6, Math.max(2, HH * 0.55))
+          : new THREE.BoxGeometry(Math.max(2, T * 0.55), 0.6, HH * k),
     std(lum > 0.5 ? 0x2A2A28 : 0xF3EFE6, 0.7));
-  band.position.set(0, -b.w / 2 - 0.3, b.h * (b.kind === 'art' ? 0.1 : 0.16));
+  band.position.set(b.lay ? -T * off : 0, -b.w / 2 - 0.3, b.lay ? 0 : HH * off);
   g.add(band);
   shadowAll(g);
   return g;
@@ -80,8 +88,9 @@ async function makeUnit(b, ex = {}) {
   add(new THREE.BoxGeometry(d.cav, b.w, C.pad), std(COL.pad, 0.95),
       [d.sx + d.cav / 2, b.w / 2, d.Z - C.top_t - C.pad / 2]);
   if (!ex.noBook) {
+    const { T, HH } = eff(b);
     const bk = bookMesh(b);
-    bk.position.set(d.sx + C.clear_t + b.t / 2 + bo[0], b.w / 2 + bo[1], d.pz + C.lift + b.h / 2 + bo[2]);
+    bk.position.set(d.sx + C.clear_t + T / 2 + bo[0], b.w / 2 + bo[1], d.pz + C.lift + HH / 2 + bo[2]);
     u.add(bk);
   }
   return u;
