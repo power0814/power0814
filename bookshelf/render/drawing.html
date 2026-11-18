@@ -24,6 +24,9 @@
 <script type="module">
 const P = new URLSearchParams(location.search);
 const FIG = P.get('fig') || 'silhouette';
+// 다른 페이지에 맞출 때: ?bg=F1F2EE&accent=E2572B
+if (P.get('bg')) document.documentElement.style.setProperty('--bg', '#' + P.get('bg'));
+if (P.get('accent')) document.documentElement.style.setProperty('--accent', '#' + P.get('accent'));
 const OUT = P.get('out') || 'out';
 const NS = 'http://www.w3.org/2000/svg';
 const loadAll = async path => (await fetch(`../${path}`)).json();

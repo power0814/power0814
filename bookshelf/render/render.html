@@ -37,6 +37,11 @@ const W = +(P.get('w') || 1600), H = +(P.get('h') || 1100);
 const C = { top_t: 4, pad: 1.5, clear_t: 0.6, lift: 10.5, pin_d: 4, pin_depth: 3, grid: 10 };
 const COL = { module: 0xECE7DF, shoe: 0x8E8780, wedge: 0xC9663D, pad: 0xB48A5A,
               pages: 0xF1EBDD, wall: 0xF7F5F1, floor: 0xD9D3C9, bg: 0xF3F0EA };
+// 다른 페이지에 맞출 때: ?bg=F1F2EE&wall=F6F7F3&floor=DADDD6&accent=E2572B
+for (const [k, key] of [['bg', 'bg'], ['wall', 'wall'], ['floor', 'floor'], ['accent', 'wedge']])
+  if (P.get(k)) COL[key] = parseInt(P.get(k), 16);
+if (P.get('bg')) document.documentElement.style.setProperty('--bg', '#' + P.get('bg'));
+if (P.get('accent')) document.documentElement.style.setProperty('--accent', '#' + P.get('accent'));
 
 const OUT = P.get('out') || 'out';
 const layout = await (await fetch(`../${OUT}/layout.json`)).json();
@@ -54,14 +59,15 @@ const shadowAll = o => o.traverse(m => { if (m.isMesh) { m.castShadow = true; m.
 
 // 책: 표지·책등은 표지색, 위아래·앞마구리는 종이색. 책등에 제목 띠.
 function bookMesh(b) {
-  const cover = std(new THREE.Color(b.color), 0.55), pages = std(COL.pages, 0.95);
+  const cover = std(new THREE.Color(P.get('bookColor') ? '#' + P.get('bookColor') : b.color), 0.55),
+        pages = std(COL.pages, 0.95);
   // BoxGeometry 면 순서: +x, -x, +y(벽 쪽 = 앞마구리), -y(책등), +z, -z
   const { T, HH } = eff(b);
   const g = new THREE.Group();
   // 눕힌 책은 표지가 위아래(±z), 세운 책은 표지가 좌우(±x)
   const faces = b.lay ? [pages, pages, pages, cover, cover, cover] : [cover, cover, pages, cover, pages, pages];
   g.add(new THREE.Mesh(new THREE.BoxGeometry(T, b.w, HH), faces));
-  const c = new THREE.Color(b.color);
+  const c = new THREE.Color(P.get('bookColor') ? '#' + P.get('bookColor') : b.color);
   const lum = 0.3 * c.r + 0.59 * c.g + 0.11 * c.b;
   const k = b.kind === 'art' ? 0.34 : 0.24, off = b.kind === 'art' ? 0.1 : 0.16;
   const band = new THREE.Mesh(
@@ -311,6 +317,93 @@ if (VIEW === 'detail') {
   const line = document.createElement('div');
   line.style.cssText = `position:absolute;left:${W / 2}px;top:24px;width:1px;height:${H - 80}px;background:#D3CEC5`;
   document.getElementById('stage').appendChild(line);
+}
+
+// 정사영(축측) 카메라: 상자 모서리가 화면 margin 안에 들어오게
+function axo(box, dir, margin = 0.86, aspect = W / H) {
+  const c = box.getCenter(new THREE.Vector3()), R = box.getSize(new THREE.Vector3()).length();
+  const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, R * 10);
+  cam.position.copy(c).addScaledVector(new THREE.Vector3(...dir).normalize(), R * 3);
+  cam.lookAt(c); cam.updateMatrixWorld();
+  let hx = 0, hy = 0;
+  for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) {
+    const p = new THREE.Vector3(x, y, z).applyMatrix4(cam.matrixWorldInverse);
+    hx = Math.max(hx, Math.abs(p.x)); hy = Math.max(hy, Math.abs(p.y));
+  }
+  const h = Math.max(hy, hx / aspect) / margin;
+  cam.left = -h * aspect; cam.right = h * aspect; cam.top = h; cam.bottom = -h;
+  cam.updateProjectionMatrix();
+  return cam;
+}
+
+// 분해 축측도: 쐐기 → 받침 → 책 → 패드 순서로 앞으로 빼서 위로 띄운다
+if (VIEW === 'explode') {
+  const r = makeRenderer();
+  const b = layout.books.find(x => x.id === (P.get('id') || '11')), d = b.dims;
+  const scene = new THREE.Scene(); scene.background = new THREE.Color(COL.bg);
+  const g = worldGroup(); scene.add(g);
+  const F = -330, add = (geo, mat, pos) => {
+    const m = new THREE.Mesh(geo, mat); m.position.set(...pos); m.castShadow = m.receiveShadow = true; g.add(m); return m;
+  };
+  add(await stl(`${b.id}_module`), std(COL.module, 0.72), [0, 0, 0]);
+  add(await stl(`${b.id}_wedge`), std(COL.wedge, 0.55), [0, F - 40, 0]);
+  add(await stl(`${b.id}_shoe`), std(COL.shoe, 0.7), [0, F, 45]);
+  const bk = bookMesh(b);
+  bk.position.set(d.sx + C.clear_t + b.t / 2, F + b.w / 2, d.pz + C.lift + b.h / 2 + 90); g.add(bk);
+  add(new THREE.BoxGeometry(d.cav, b.w, C.pad), std(COL.pad, 0.95),
+      [d.sx + d.cav / 2, F + b.w / 2, d.Z - C.top_t - C.pad / 2 + 140]);
+  const pinGeo = new THREE.CylinderGeometry(C.pin_d / 2, C.pin_d / 2, 2 * C.pin_depth - 0.4, 24);
+  for (const [x, y] of [[15, d.Y - 20], [55, d.Y - 20], [15, d.Y - 100], [55, d.Y - 100]]) {
+    const pin = add(pinGeo, std(0x5F6662, 0.45), [x, y, d.Z + 60]);
+    pin.rotation.x = Math.PI / 2;
+  }
+  const box = new THREE.Box3().setFromObject(g);
+  addLights(scene, box, [0.5, 1.4, 1.0], 2.2);
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(8000, 8000), new THREE.ShadowMaterial({ opacity: 0.12 }));
+  floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
+  const cam = axo(box, [1.0, 0.78, 1.05], 0.8);
+  r.render(scene, cam);
+  const bx = d.sx + d.cav / 2;
+  labels([
+    { at: [d.X * 0.5, 0, d.pz / 2], dx: 90, dy: 90, text: '<b>모듈 본체</b> — 바닥판·윗판·뒷벽·측벽 한 덩어리' },
+    { at: [d.X, d.Y * 0.45, d.Z - 2], dx: 110, dy: 20, text: '<b>열린 쪽</b> — 윗판 끝을 책이 받친다' },
+    { at: [d.X - 15, d.Y - 20, d.Z + 60], dx: 120, dy: -40, text: '<b>연결 핀</b> Ø4 · 10 mm 격자' },
+    { at: [bx, F + b.w * 0.5, d.Z - C.top_t + 140], dx: -90, dy: -60, text: '<b>코르크 패드</b> 1.5 mm · 윗판 밑에 붙임' },
+    { at: [bx, F, d.pz + C.lift + 90 + b.h * 0.5], dx: -110, dy: 0, text: '<b>책</b> 305 × 245 × 65' },
+    { at: [bx, F + 8, 45 + d.pz + 8], dx: -110, dy: 10, text: '<b>받침</b> — 밑면에 쐐기 홈, 가운데는 비움' },
+    { at: [bx, F - 40 + 40, d.pz + 6], dx: -60, dy: 70, accent: true, text: '<b>쐐기</b> — 앞 8 mm → 뒤 2 mm' },
+  ], cam, { x: 0, y: 0, w: W, h: H }, g);
+}
+
+// 출력 배치: 닫힌 측벽을 바닥에 눕힌다
+if (VIEW === 'print') {
+  const r = makeRenderer();
+  const b = layout.books.find(x => x.id === (P.get('id') || '11')), d = b.dims;
+  const scene = new THREE.Scene(); scene.background = new THREE.Color(COL.bg);
+  const g = worldGroup(); scene.add(g);
+  const bed = new THREE.Mesh(new THREE.BoxGeometry(350, 340, 6), std(0x2E3130, 0.85));
+  bed.position.set(0, 0, -3); bed.receiveShadow = true; g.add(bed);
+  const area = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(330, 320, 0.1)),
+    new THREE.LineBasicMaterial({ color: 0x8C938F }));
+  area.position.set(0, 0, 0.2); g.add(area);
+  const m = new THREE.Mesh(await stl(`${b.id}_module`), std(COL.module, 0.72));
+  m.castShadow = m.receiveShadow = true;
+  const holder = new THREE.Group(); holder.add(m);
+  m.rotation.y = -Math.PI / 2;                // 모듈 x(두께) → 위
+  m.position.set(d.Z / 2, -d.Y / 2, 0);      // 바닥 면적 Z × Y를 판 가운데로
+  g.add(holder);
+  const box = new THREE.Box3().setFromObject(g);
+  addLights(scene, box, [-0.6, 1.5, 0.8], 2.2);
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(8000, 8000), new THREE.ShadowMaterial({ opacity: 0.1 }));
+  floor.rotation.x = -Math.PI / 2; floor.position.y = -6; floor.receiveShadow = true; scene.add(floor);
+  const cam = perspective(box, [0.55, 0.85, 1.0], 22, 0.82);
+  r.render(scene, cam);
+  labels([
+    { at: [-d.Z / 2 + 40, -d.Y / 2 + 6, d.X], dx: -50, dy: -90, text: '<b>위로 쌓이는 방향 = 모듈 두께</b> 70 mm' },
+    { at: [d.Z / 2 - 30, d.Y / 2 - 3, d.X / 2], dx: 60, dy: -70, text: '바닥판·윗판·뒷벽이 모두 <b>수직 벽</b>으로 올라간다' },
+    { at: [160, -150, 0], dx: 70, dy: 60, text: '<b>출력 범위</b> 330 × 320 — 바닥 면적 330 × 250 사용' },
+    { at: [0, 0, 0], dx: -120, dy: 150, text: '<b>측벽 창</b> — 바닥에 닿는 면이라 그대로 뚫린다' },
+  ], cam, { x: 0, y: 0, w: W, h: H }, g);
 }
 
 window.__done = true;

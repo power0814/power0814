@@ -41,6 +41,7 @@
 | `out/old/layout.json` | 비교용: 무게 규칙 없이 쌓은 배치 |
 | `assembly.scad` | 전체 책장 미리보기 (OpenSCAD에서 열기) |
 | `render/` | three.js + Playwright 렌더러 |
+| `notes/` | 모듈 설계 노트 페이지 (형태·구조·꺼내기·출력을 축척 도면으로 설명) |
 | `renders/` | 렌더 이미지 |
 
 ## 사용법

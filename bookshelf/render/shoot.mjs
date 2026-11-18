@@ -9,7 +9,7 @@ const { chromium } = createRequire(import.meta.url)('playwright');
 
 const ROOT = new URL('..', import.meta.url).pathname;   // bookshelf/
 const BASE = 'http://bookshelf.local';
-const OUT = join(ROOT, 'renders/');
+const OUT = process.env.OUT_DIR ? process.env.OUT_DIR.replace(/\/?$/, '/') : join(ROOT, 'renders/');
 mkdirSync(OUT, { recursive: true });
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.json': 'application/json',
                 '.stl': 'application/octet-stream', '.css': 'text/css' };
@@ -24,6 +24,8 @@ const shots = [
   // 무게 규칙 전후 비교: python3 layout.py --no-heavy-low --max-height 99999 --out out/old
   { name: 'rule',       url: '/render/drawing.html?fig=rule',       w: 1600, h: 1050 },
 ];
+// 다른 목록으로 찍을 때: SHOTS_JSON='[{"name":..., "url":..., "w":..., "h":...}]'
+if (process.env.SHOTS_JSON) shots.splice(0, shots.length, ...JSON.parse(process.env.SHOTS_JSON));
 const only = process.argv.slice(2);
 
 const browser = await chromium.launch({
