@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Bookshelf Drawing</title>
+<style>
+  :root { --bg: #F3F0EA; --ink: #1D1D1B; --muted: #77726A; --rule: #CFC9BF; --accent: #C9663D; }
+  html, body { margin: 0; background: var(--bg); }
+  body { font-family: "Noto Sans CJK KR", "Noto Sans KR", sans-serif; color: var(--ink); }
+  svg { display: block; }
+  text { font-family: inherit; }
+  .t1 { font-size: 26px; font-weight: 700; letter-spacing: .01em; }
+  .t2 { font-size: 14px; fill: var(--muted); }
+  .num { font-size: 10px; font-weight: 700; fill: var(--bg); font-family: "DejaVu Sans Mono", monospace; }
+  .dim { font-size: 12px; fill: var(--muted); font-family: "DejaVu Sans Mono", monospace; }
+  .leg { font-size: 13px; }
+  .legm { font-size: 12px; fill: var(--muted); font-family: "DejaVu Sans Mono", monospace; }
+  .cap { font-size: 15px; font-weight: 700; }
+  .capm { font-size: 13px; fill: var(--muted); }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="module">
+const P = new URLSearchParams(location.search);
+const FIG = P.get('fig') || 'silhouette';
+const layout = await (await fetch('../out/layout.json')).json();
+const books = layout.books;
+const NS = 'http://www.w3.org/2000/svg';
+
+const rects = books.map(b => ({ id: b.id, x: b.pos[0], z: b.pos[2], X: b.dims.X, Z: b.dims.Z, b }));
+const totalW = Math.max(...rects.map(r => r.x + r.X));
+const totalH = Math.max(...rects.map(r => r.z + r.Z));
+
+function svg(w, h) {
+  const s = document.createElementNS(NS, 'svg');
+  s.setAttribute('width', w); s.setAttribute('height', h); s.setAttribute('viewBox', `0 0 ${w} ${h}`);
+  document.getElementById('root').appendChild(s);
+  return s;
+}
+const el = (parent, tag, attrs, txt) => {
+  const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  if (txt !== undefined) e.textContent = txt;
+  parent.appendChild(e); return e;
+};
+
+// 정면 실루엣: 모듈 앞면 사각형. 이음매는 배경색 선으로.
+function silhouette(g, list, ox, gy, s, opts = {}) {
+  for (const r of list) {
+    const fill = opts.fill ? opts.fill(r) : 'var(--ink)';
+    el(g, 'rect', { x: ox + r.x * s, y: gy - (r.z + r.Z) * s, width: r.X * s, height: r.Z * s,
+                    fill, stroke: 'var(--bg)', 'stroke-width': opts.joint ?? 1.4 });
+    if (opts.numbers)
+      el(g, 'text', { x: ox + (r.x + r.X / 2) * s, y: gy - (r.z + r.Z) * s + 15,
+                      'text-anchor': 'middle', class: 'num' }, r.id);
+  }
+  el(g, 'line', { x1: ox - 60, x2: ox + totalW * s + 60, y1: gy + 0.7, y2: gy + 0.7,
+                  stroke: 'var(--ink)', 'stroke-width': 1.4 });
+}
+
+function dimH(g, x1, x2, y, label) {
+  el(g, 'line', { x1, x2, y1: y, y2: y, stroke: 'var(--muted)', 'stroke-width': 1 });
+  for (const x of [x1, x2]) el(g, 'line', { x1: x - 5, x2: x + 5, y1: y + 5, y2: y - 5, stroke: 'var(--muted)' });
+  el(g, 'text', { x: (x1 + x2) / 2, y: y + 18, 'text-anchor': 'middle', class: 'dim' }, label);
+}
+function dimV(g, x, y1, y2, label) {
+  el(g, 'line', { x1: x, x2: x, y1, y2, stroke: 'var(--muted)', 'stroke-width': 1 });
+  for (const y of [y1, y2]) el(g, 'line', { x1: x - 5, x2: x + 5, y1: y + 5, y2: y - 5, stroke: 'var(--muted)' });
+  el(g, 'text', { x: x + 10, y: (y1 + y2) / 2 + 4, class: 'dim' }, label);
+}
+function scaleBar(g, x, y, s) {
+  for (let i = 0; i < 2; i++)
+    el(g, 'rect', { x: x + i * 100 * s, y, width: 100 * s, height: 6,
+                    fill: i % 2 ? 'var(--bg)' : 'var(--ink)', stroke: 'var(--ink)', 'stroke-width': 1 });
+  ['0', '100', '200 mm'].forEach((t, i) =>
+    el(g, 'text', { x: x + i * 100 * s, y: y + 22, 'text-anchor': i === 2 ? 'start' : 'middle', class: 'dim' }, t));
+}
+
+if (FIG === 'silhouette') {
+  const W = 1600, H = 1100, s = 820 / totalH;
+  const g = svg(W, H);
+  el(g, 'text', { x: 64, y: 78, class: 't1' }, '장서의 실루엣 — 정면도');
+  el(g, 'text', { x: 64, y: 106, class: 't2' },
+     `예시 장서 ${books.length}권 · 한 칸에 한 권 · 바깥 치수 10 mm 격자 · 들어온 순서대로 쌓음`);
+  const ox = 150, gy = 1010;
+  silhouette(g, rects, ox, gy, s, { numbers: true });
+  dimH(g, ox, ox + totalW * s, gy + 34, `${totalW}`);
+  dimV(g, ox + totalW * s + 40, gy, gy - totalH * s, `${totalH}`);
+  scaleBar(g, ox + totalW * s + 120, gy - 6, s);
+
+  // 범례
+  const lx = 860; let ly = 170;
+  el(g, 'text', { x: lx, y: ly - 26, class: 'cap' }, '번호 · 책 · 책 치수(높이×너비×두께) · 입고일');
+  el(g, 'line', { x1: lx, x2: lx + 680, y1: ly - 14, y2: ly - 14, stroke: 'var(--rule)' });
+  for (const b of books) {
+    el(g, 'rect', { x: lx, y: ly - 11, width: 14, height: 14, fill: b.color, stroke: '#00000022' });
+    el(g, 'text', { x: lx + 26, y: ly + 1, class: 'legm' }, b.id);
+    el(g, 'text', { x: lx + 56, y: ly + 1, class: 'leg' }, b.label);
+    el(g, 'text', { x: lx + 330, y: ly + 1, class: 'legm' }, `${b.h}×${b.w}×${b.t}`);
+    el(g, 'text', { x: lx + 460, y: ly + 1, class: 'legm' }, `→ ${b.dims.X}×${b.dims.Y}×${b.dims.Z}`);
+    el(g, 'text', { x: lx + 610, y: ly + 1, class: 'legm' }, b.date);
+    ly += 33;
+  }
+  el(g, 'text', { x: lx + 460, y: 144, class: 'capm' }, '모듈');
+}
+
+if (FIG === 'growth') {
+  const W = 1800, H = 900, s = 600 / totalH;
+  const g = svg(W, H);
+  el(g, 'text', { x: 64, y: 78, class: 't1' }, '자라는 순서');
+  el(g, 'text', { x: 64, y: 106, class: 't2' },
+     '새 책은 들어온 순서대로, 지금 형태에서 가장 낮고 아래 모듈이 받쳐 주는 자리에 놓인다. 주황 = 직전 단계 이후 들어온 책');
+  const steps = [6, 11, 16, books.length];
+  const gy = 790, panel = (W - 128) / steps.length;
+  steps.forEach((n, i) => {
+    const prev = i ? steps[i - 1] : 0;
+    const ox = 64 + i * panel + (panel - totalW * s) / 2;
+    silhouette(g, rects.slice(0, n), ox, gy, s, {
+      fill: r => (+r.id > prev ? 'var(--accent)' : 'var(--ink)'), joint: 1.2 });
+    const last = books[n - 1];
+    el(g, 'text', { x: ox + totalW * s / 2, y: gy + 40, 'text-anchor': 'middle', class: 'cap' }, `${n}권`);
+    el(g, 'text', { x: ox + totalW * s / 2, y: gy + 62, 'text-anchor': 'middle', class: 'capm' }, `~ ${last.date}`);
+  });
+}
+
+window.__done = true;
+</script>
+</body>
+</html>

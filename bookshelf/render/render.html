@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Bookshelf Render</title>
+<style>
+  :root { --bg: #F3F0EA; --ink: #1D1D1B; --muted: #6B675F; --accent: #C9663D; }
+  html, body { margin: 0; background: var(--bg); }
+  body { font-family: "Noto Sans CJK KR", "Noto Sans KR", sans-serif; color: var(--ink); }
+  #stage { position: relative; }
+  canvas { display: block; }
+  svg.overlay { position: absolute; inset: 0; pointer-events: none; }
+  .label { position: absolute; font-size: 13px; line-height: 1.35; white-space: nowrap;
+           background: rgba(243,240,234,.9); padding: 3px 6px; border-left: 2px solid var(--ink); }
+  .label b { font-weight: 700; }
+  .label.accent { border-left-color: var(--accent); }
+  .cap { position: absolute; font-size: 15px; font-weight: 700; letter-spacing: .02em; }
+  .sub { position: absolute; font-size: 13px; color: var(--muted); }
+</style>
+<script type="importmap">
+{ "imports": {
+    "three": "./node_modules/three/build/three.module.js",
+    "three/addons/": "./node_modules/three/examples/jsm/" } }
+</script>
+</head>
+<body>
+<div id="stage"></div>
+<script type="module">
+import * as THREE from 'three';
+import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+
+const P = new URLSearchParams(location.search);
+const VIEW = P.get('view') || 'hero';
+const W = +(P.get('w') || 1600), H = +(P.get('h') || 1100);
+
+// book_module.scad 기본값과 같아야 한다
+const C = { top_t: 4, pad: 1.5, clear_t: 0.6, lift: 10.5, pin_d: 4, pin_depth: 3, grid: 10 };
+const COL = { module: 0xECE7DF, shoe: 0x8E8780, wedge: 0xC9663D, pad: 0xB48A5A,
+              pages: 0xF1EBDD, wall: 0xF7F5F1, floor: 0xD9D3C9, bg: 0xF3F0EA };
+
+const layout = await (await fetch('../out/layout.json')).json();
+const loader = new STLLoader();
+const cache = new Map();
+const stl = name => {
+  if (!cache.has(name)) cache.set(name, loader.loadAsync(`../out/stl/${name}.stl`));
+  return cache.get(name);
+};
+const std = (color, roughness = 0.8) =>
+  new THREE.MeshStandardMaterial({ color, roughness, metalness: 0 });
+const shadowAll = o => o.traverse(m => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
+
+// 책: 표지·책등은 표지색, 위아래·앞마구리는 종이색. 책등에 제목 띠.
+function bookMesh(b) {
+  const cover = std(new THREE.Color(b.color), 0.55), pages = std(COL.pages, 0.95);
+  // BoxGeometry 면 순서: +x, -x, +y(벽 쪽 = 앞마구리), -y(책등), +z, -z
+  const g = new THREE.Group();
+  g.add(new THREE.Mesh(new THREE.BoxGeometry(b.t, b.w, b.h), [cover, cover, pages, cover, pages, pages]));
+  const c = new THREE.Color(b.color);
+  const lum = 0.3 * c.r + 0.59 * c.g + 0.11 * c.b;
+  const band = new THREE.Mesh(
+    new THREE.BoxGeometry(Math.max(2, b.t * 0.55), 0.6, b.h * (b.kind === 'art' ? 0.34 : 0.24)),
+    std(lum > 0.5 ? 0x2A2A28 : 0xF3EFE6, 0.7));
+  band.position.set(0, -b.w / 2 - 0.3, b.h * (b.kind === 'art' ? 0.1 : 0.16));
+  g.add(band);
+  shadowAll(g);
+  return g;
+}
+
+// 모듈 하나 (모듈 좌표계: x 두께, y 깊이(0=앞), z 위)
+async function makeUnit(b, ex = {}) {
+  const d = b.dims, u = new THREE.Group();
+  const add = (geo, mat, pos = [0, 0, 0]) => {
+    const m = new THREE.Mesh(geo, mat); m.position.set(...pos);
+    m.castShadow = m.receiveShadow = true; u.add(m); return m;
+  };
+  add(await stl(`${b.id}_module`), std(COL.module, 0.72));
+  const bo = ex.book || [0, 0, 0];
+  add(await stl(`${b.id}_shoe`), std(COL.shoe, 0.7), bo);
+  add(await stl(`${b.id}_wedge`), std(COL.wedge, 0.55), ex.wedge || [0, 0, 0]);
+  add(new THREE.BoxGeometry(d.cav, b.w, C.pad), std(COL.pad, 0.95),
+      [d.sx + d.cav / 2, b.w / 2, d.Z - C.top_t - C.pad / 2]);
+  if (!ex.noBook) {
+    const bk = bookMesh(b);
+    bk.position.set(d.sx + C.clear_t + b.t / 2 + bo[0], b.w / 2 + bo[1], d.pz + C.lift + b.h / 2 + bo[2]);
+    u.add(bk);
+  }
+  return u;
+}
+
+function makeRenderer() {
+  const r = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+  r.setPixelRatio(window.devicePixelRatio);
+  r.setSize(W, H);
+  r.shadowMap.enabled = true;
+  r.shadowMap.type = THREE.PCFSoftShadowMap;
+  r.toneMapping = THREE.ACESFilmicToneMapping;
+  r.toneMappingExposure = 1.05;
+  r.outputColorSpace = THREE.SRGBColorSpace;
+  document.getElementById('stage').appendChild(r.domElement);
+  return r;
+}
+
+function addRoom(scene, withWall = true) {
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(8000, 8000), std(COL.floor, 0.95));
+  floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
+  if (withWall) {
+    const wall = new THREE.Mesh(new THREE.PlaneGeometry(8000, 5000), std(COL.wall, 0.95));
+    wall.position.set(0, 2500, -0.5); wall.receiveShadow = true; scene.add(wall);
+  }
+}
+
+function addLights(scene, box, dir, strength = 2.4) {
+  scene.add(new THREE.HemisphereLight(0xFFFFFF, 0xD6CFC4, 1.15));
+  const c = box.getCenter(new THREE.Vector3()), s = box.getSize(new THREE.Vector3());
+  const R = Math.max(s.x, s.y, s.z);
+  const sun = new THREE.DirectionalLight(0xFFF8EE, strength);
+  sun.position.copy(c).add(new THREE.Vector3(...dir).normalize().multiplyScalar(R * 3));
+  sun.target.position.copy(c);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(4096, 4096);
+  const cam = sun.shadow.camera;
+  cam.left = cam.bottom = -R * 1.3; cam.right = cam.top = R * 1.3;
+  cam.near = R * 0.5; cam.far = R * 6;
+  sun.shadow.bias = -0.0002; sun.shadow.normalBias = 0.6;
+  scene.add(sun, sun.target);
+  const fill = new THREE.DirectionalLight(0xE8EEF5, 0.45);
+  fill.position.copy(c).add(new THREE.Vector3(1, 0.4, 0.8).multiplyScalar(R * 3));
+  scene.add(fill);
+}
+
+// 우리 좌표(z 위) → three 좌표(y 위)
+function worldGroup() { const g = new THREE.Group(); g.rotation.x = -Math.PI / 2; return g; }
+
+// 상자 모서리 8개가 화면의 margin 안에 들어오는 거리를 이분 탐색으로 찾는다
+function perspective(box, dir, fov = 26, margin = 0.86, aspect = W / H, shift = [0, 0]) {
+  const cam = new THREE.PerspectiveCamera(fov, aspect, 10, 50000);
+  const c = box.getCenter(new THREE.Vector3());
+  const look = c.clone().add(new THREE.Vector3(shift[0], shift[1], 0));
+  const u = new THREE.Vector3(...dir).normalize();
+  const corners = [];
+  for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y])
+    for (const z of [box.min.z, box.max.z]) corners.push(new THREE.Vector3(x, y, z));
+  const extent = d => {
+    cam.position.copy(look).addScaledVector(u, d); cam.lookAt(look);
+    cam.updateMatrixWorld(); cam.updateProjectionMatrix();
+    return Math.max(...corners.map(p => { const q = p.clone().project(cam); return Math.max(Math.abs(q.x), Math.abs(q.y)); }));
+  };
+  let lo = 10, hi = 40000;
+  for (let i = 0; i < 40; i++) { const mid = (lo + hi) / 2; if (extent(mid) > margin) lo = mid; else hi = mid; }
+  extent(hi);
+  return cam;
+}
+
+// 라벨: 3D 점 → 화면 좌표, 지시선
+function labels(items, cam, vp, group) {
+  const stage = document.getElementById('stage');
+  let svg = stage.querySelector('svg.overlay');
+  if (!svg) {
+    svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'overlay'); svg.setAttribute('width', W); svg.setAttribute('height', H);
+    stage.appendChild(svg);
+  }
+  group.updateMatrixWorld(true);
+  for (const it of items) {
+    const p = new THREE.Vector3(...it.at).applyMatrix4(group.matrixWorld).project(cam);
+    const x = vp.x + (p.x + 1) / 2 * vp.w, y = vp.y + (1 - p.y) / 2 * vp.h;
+    const lx = x + it.dx, ly = y + it.dy;
+    const col = it.accent ? '#C9663D' : '#1D1D1B';
+    svg.insertAdjacentHTML('beforeend',
+      `<line x1="${x}" y1="${y}" x2="${lx}" y2="${ly}" stroke="${col}" stroke-width="1"/>` +
+      `<circle cx="${x}" cy="${y}" r="3" fill="${col}"/>`);
+    const el = document.createElement('div');
+    el.className = 'label' + (it.accent ? ' accent' : '');
+    el.innerHTML = it.text;
+    stage.appendChild(el);
+    const r = el.getBoundingClientRect();
+    const left = Math.min(Math.max(it.dx < 0 ? lx - r.width : lx, vp.x + 12), vp.x + vp.w - r.width - 12);
+    el.style.left = left + 'px';
+    el.style.top = (ly - r.height / 2) + 'px';
+  }
+}
+function text(cls, html, x, y) {
+  const el = document.createElement('div'); el.className = cls; el.innerHTML = html;
+  el.style.left = x + 'px'; el.style.top = y + 'px';
+  document.getElementById('stage').appendChild(el);
+}
+
+// ------------------------------------------------------------
+async function shelfScene(books) {
+  const scene = new THREE.Scene(); scene.background = new THREE.Color(COL.bg);
+  const world = worldGroup(); scene.add(world);
+  for (const b of books) {
+    const u = await makeUnit(b);
+    u.position.set(...b.pos);
+    world.add(u);
+  }
+  const box = new THREE.Box3().setFromObject(world);
+  addRoom(scene);
+  return { scene, world, box };
+}
+
+if (VIEW === 'hero' || VIEW === 'front') {
+  const r = makeRenderer();
+  const { scene, box } = await shelfScene(layout.books);
+  let cam;
+  if (VIEW === 'hero') {
+    addLights(scene, box, [-0.9, 1.25, 0.95]);
+    cam = perspective(box, [-0.55, 0.26, 1], 24, 0.8);
+  } else {
+    addLights(scene, box, [-0.75, 1.0, 1.0], 2.2);
+    const c = box.getCenter(new THREE.Vector3()), s = box.getSize(new THREE.Vector3());
+    const hh = s.y / 2 * 1.16, hw = hh * W / H;
+    cam = new THREE.OrthographicCamera(-hw, hw, hh, -hh, 10, 20000);
+    cam.position.set(c.x, c.y, 6000); cam.lookAt(c.x, c.y, 0);
+  }
+  r.render(scene, cam);
+}
+
+if (VIEW === 'detail') {
+  const r = makeRenderer();
+  r.setScissorTest(true);
+  const b = layout.books.find(x => x.id === (P.get('id') || '05'));
+  const d = b.dims;
+  const half = { w: W / 2, h: H };
+
+  // A: 조립 상태, 왼쪽 앞에서 (닫힌 측벽)
+  const sA = new THREE.Scene(); sA.background = new THREE.Color(COL.bg);
+  const gA = worldGroup(); sA.add(gA);
+  gA.add(await makeUnit(b));
+  addRoom(sA, false);
+  const boxA = new THREE.Box3().setFromObject(gA);
+  addLights(sA, boxA, [-0.6, 1.3, 0.9], 2.3);
+  const camA = perspective(boxA, [-1.0, 0.42, 0.78], 24, 0.72, half.w / half.h);
+
+  // B: 책을 꺼낼 때, 오른쪽 앞 위에서 (열린 쪽으로 칸 안이 보이게)
+  const sB = new THREE.Scene(); sB.background = new THREE.Color(COL.bg);
+  const gB = worldGroup(); sB.add(gB);
+  const OUTB = -230, OUTW = -430;
+  gB.add(await makeUnit(b, { book: [0, OUTB, 0], wedge: [0, OUTW, 0] }));
+  // 원래 자리: 점선 윤곽
+  const ghost = new THREE.LineSegments(
+    new THREE.EdgesGeometry(new THREE.BoxGeometry(b.t, b.w, b.h)),
+    new THREE.LineDashedMaterial({ color: 0x1D1D1B, dashSize: 6, gapSize: 5, transparent: true, opacity: 0.55 }));
+  ghost.position.set(d.sx + C.clear_t + b.t / 2, b.w / 2, d.pz + C.lift + b.h / 2);
+  ghost.computeLineDistances();
+  gB.add(ghost);
+  addRoom(sB, false);
+  const boxB = new THREE.Box3().setFromObject(gB);
+  addLights(sB, boxB, [0.3, 1.4, 1.0], 2.3);
+  const camB = perspective(boxB, [1.0, 0.72, 0.62], 24, 0.74, half.w / half.h);
+
+  for (const [s, cam, x] of [[sA, camA, 0], [sB, camB, W / 2]]) {
+    r.setViewport(x, 0, half.w, half.h); r.setScissor(x, 0, half.w, half.h);
+    r.render(s, cam);
+  }
+
+  const bx = d.sx + d.cav / 2, top = d.pz + C.lift + b.h;
+  labels([
+    { at: [0, 6, d.Z * 0.6], dx: -60, dy: -170, text: '<b>닫힌 측벽</b> — 한쪽에만 있다<br>창으로 표지가 보인다' },
+    { at: [0, d.Y * 0.3, d.pz / 2], dx: -30, dy: 70, text: '<b>바닥판</b> — 격자와 책의 차이만큼 두꺼워진다<br>측면에 번호·입고일·책 치수 각인' },
+    { at: [d.X / 2, d.Y - 20, d.Z], dx: 40, dy: -70, text: '<b>윗판</b> · 핀 구멍 10mm 격자' },
+    { at: [bx, 0, d.pz + C.lift + b.h * 0.55], dx: 70, dy: 40, text: '<b>책등</b>이 모듈 앞면과 같은 면' },
+    { at: [bx, -12, d.pz + 4], dx: 60, dy: 60, accent: true, text: '<b>쐐기 손잡이</b>' },
+  ], camA, { x: 0, y: 0, w: half.w, h: half.h }, gA);
+  const bookR = d.sx + C.clear_t + b.t;
+  labels([
+    { at: [d.X, d.Y * 0.55, d.Z - C.top_t / 2], dx: -40, dy: -120, text: '<b>열린 쪽</b> — 윗판 모서리를 책이 받친다<br>책이 빠지면 이 모서리가 처진다' },
+    { at: [d.sx + d.cav * 0.75, d.Y * 0.8, d.Z - C.top_t - C.pad], dx: 40, dy: -70, text: '<b>코르크 패드</b> 1.5 mm' },
+    { at: [d.X / 2, d.Y - d.by, d.Z - C.top_t - 16], dx: 30, dy: 110, text: '<b>뒷벽</b> · 벽 고정 열쇠구멍' },
+    { at: [d.sx + C.clear_t + b.t, b.w * 0.45, d.pz + C.lift + b.h * 0.35], dx: 60, dy: 150, text: '점선 — 책이 있던 자리' },
+    { at: [bookR, OUTB + b.w * 0.5, d.pz + C.lift + b.h * 0.62], dx: -90, dy: -110, text: '<b>책 + 받침</b>이 함께 빠진다' },
+    { at: [bx, OUTW + 70, d.pz + 5], dx: -50, dy: 80, accent: true, text: '<b>쐐기</b>를 먼저 빼면 받침이 2 mm 내려가<br>하중이 풀린다 (쌍쐐기)' },
+  ], camB, { x: W / 2, y: 0, w: half.w, h: half.h }, gB);
+
+  text('cap', 'A. 조립된 상태', 28, 22);
+  text('cap', 'B. 책을 꺼낼 때', W / 2 + 28, 22);
+  text('sub', `${b.id} ${b.label} · 책 ${b.h}×${b.w}×${b.t} mm → 모듈 ${d.X}×${d.Y}×${d.Z} mm (격자 10 mm)`, 28, H - 36);
+  const line = document.createElement('div');
+  line.style.cssText = `position:absolute;left:${W / 2}px;top:24px;width:1px;height:${H - 80}px;background:#D3CEC5`;
+  document.getElementById('stage').appendChild(line);
+}
+
+window.__done = true;
+</script>
+</body>
+</html>

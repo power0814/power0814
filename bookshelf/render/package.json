@@ -1,0 +1,9 @@
+{
+  "name": "bookshelf-render",
+  "private": true,
+  "type": "module",
+  "description": "layout.json + STL → 렌더 이미지 (three.js, Playwright)",
+  "dependencies": {
+    "three": "0.160.0"
+  }
+}
