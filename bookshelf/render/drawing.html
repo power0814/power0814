@@ -191,6 +191,77 @@ if (FIG === 'rule') {
   weightKey(g, W - 300, 150);
 }
 
+
+// 엇쌓기 비교: 지금 / 엄격 / 완화
+function supportsOf(R, r) {
+  return R.rects.filter(o => o !== r && o.z + o.Z === r.z && o.x < r.x + r.X && o.x + o.X > r.x);
+}
+if (FIG === 'bond') {
+  const sets = [
+    { L: await loadL('out'), cap: '지금 규칙', sub: '엇쌓기 없음' },
+    { L: await loadL('out/bond_strict'), cap: '엄격한 엇쌓기', sub: '괴임 ≤ 40 · 받침 깊이 75% · 받치는 칸 무게 ≥ ½' },
+    { L: await loadL('out/bond'), cap: '완화한 엇쌓기', sub: '괴임 ≤ 80 · 받침 깊이 60% · 무게 비율 조건 없음' },
+  ].map(s => ({ ...s, R: rectsOf(s.L.books), shims: (s.L.shims || []).map(q => ({ x: q.x, z: q.z, X: q.X, Z: q.H })) }));
+  const W = 1800, H = 1000, gap = 110;
+  const totW = sets.reduce((a, s) => a + s.R.W, 0);
+  const maxH = Math.max(...sets.map(s => Math.max(s.R.H, s.L.max_height || 0)));
+  const s = Math.min(680 / maxH, (W - 160 - gap * 2) / totW);
+  const g = svg(W, H);
+  el(g, 'text', { x: 64, y: 78, class: 't1' }, '엇쌓기: 위 칸이 아래 칸 두 개에 걸치게');
+  el(g, 'text', { x: 64, y: 106, class: 't2' }, '같은 28권, 같은 순서. 진할수록 무거운 책, 주황 = 높이 차이를 메우는 괴임 블록 (10 mm 단위)');
+  const gy = 850; let ox = 80;
+  for (const st of sets) {
+    const R = st.R;
+    silhouette(g, R.rects, R.W, ox, gy, s, { joint: 1.1 });
+    for (const q of st.shims)
+      el(g, 'rect', { x: ox + q.x * s, y: gy - (q.z + q.Z) * s, width: q.X * s, height: q.Z * s,
+                      fill: 'var(--accent)', stroke: 'var(--bg)', 'stroke-width': 0.8 });
+    const ups = R.rects.filter(r => r.z > 0);
+    const single = ups.filter(r => (r.b.supports ? r.b.supports.length : supportsOf(R, r).length) < 2).length;
+    if (st.L.max_height) limitLine(g, ox - 20, ox + R.W * s + 20, gy, s, st.L.max_height, false);
+    dimH(g, ox, ox + R.W * s, gy + 26, `${R.W} × ${R.H}`);
+    el(g, 'text', { x: ox, y: gy + 72, class: 'cap' }, st.cap);
+    el(g, 'text', { x: ox, y: gy + 93, class: 'capm' }, st.sub);
+    el(g, 'text', { x: ox, y: gy + 112, class: 'capm' },
+       `위 칸 ${ups.length}개 중 ${single ? `${single}개가 한 칸에만 얹힘` : '전부 두 칸 이상에 걸침'} · 바닥 ${R.rects.length - ups.length}개 · 괴임 ${st.shims.length}개`);
+    ox += R.W * s + gap;
+  }
+  el(g, 'text', { x: 80, y: gy - (sets[0].L.max_height) * s - 10, class: 'capm', fill: '#A9502E' }, '최대 1500 mm');
+}
+
+// 책 한 권을 빼면: 위 칸이 빈자리를 건너 옆 칸으로 하중을 넘긴다
+if (FIG === 'remove') {
+  const L = await loadL(P.get('src') || 'out/bond'), R = rectsOf(L.books);
+  const shims = (L.shims || []).map(q => ({ x: q.x, z: q.z, X: q.X, Z: q.H, q }));
+  // 위에 얹힌 칸이 가장 많은 바닥 칸을 고른다
+  const score = r => R.rects.filter(u => (u.b.supports || []).includes(r.id)).length;
+  const M = P.get('id') ? R.rects.find(r => r.id === P.get('id')) : [...R.rects].sort((a, b) => score(b) - score(a))[0];
+  const above = R.rects.filter(u => (u.b.supports || []).includes(M.id));
+  const W = 1600, H = 1000, s = Math.min(740 / Math.max(R.H, 700), 1400 / R.W);
+  const g = svg(W, H);
+  el(g, 'text', { x: 64, y: 78, class: 't1' }, `책 한 권을 빼면 · ${M.id} ${M.b.label}`);
+  el(g, 'text', { x: 64, y: 106, class: 't2' }, '빠진 칸 위의 칸은 다른 받침으로 하중을 넘긴다. 점선 = 책을 뺀 칸, 주황 화살표 = 하중이 옮겨 가는 길');
+  const ox = (W - R.W * s) / 2, gy = 880;
+  silhouette(g, R.rects.filter(r => r !== M), R.W, ox, gy, s, { joint: 1.1, fill: r => (above.includes(r) ? '#3B4542' : '#C9CCC6') });
+  for (const q of shims) el(g, 'rect', { x: ox + q.x * s, y: gy - (q.z + q.Z) * s, width: q.X * s, height: q.Z * s, fill: 'var(--accent)', stroke: 'var(--bg)', 'stroke-width': 0.8 });
+  el(g, 'rect', { x: ox + M.x * s, y: gy - (M.z + M.Z) * s, width: M.X * s, height: M.Z * s,
+                  fill: 'none', stroke: 'var(--ink)', 'stroke-width': 1.4, 'stroke-dasharray': '6 4' });
+  el(g, 'text', { x: ox + (M.x + M.X / 2) * s, y: gy - (M.z + M.Z / 2) * s, 'text-anchor': 'middle', class: 'capm' }, '빈 칸');
+  const defs = el(g, 'defs', {});
+  defs.innerHTML = '<marker id="ar" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#E2572B"/></marker>';
+  for (const u of above) {
+    for (const sid of u.b.supports.filter(i => i !== M.id)) {
+      const o = sid === 'floor' ? null : R.rects.find(r => r.id === sid);
+      const ux = ox + (u.x + u.X / 2) * s, uy = gy - (u.z + u.Z * 0.45) * s;
+      const tx = o ? ox + (Math.max(o.x, u.x) + Math.min(o.x + o.X, u.x + u.X)) / 2 * s : ux;
+      const ty = o ? gy - (o.z + o.Z) * s - 2 : gy;
+      el(g, 'path', { d: `M ${ux} ${uy} Q ${(ux + tx) / 2} ${uy - 40} ${tx} ${ty}`, fill: 'none', stroke: '#E2572B', 'stroke-width': 2.4, 'marker-end': 'url(#ar)' });
+    }
+  }
+  el(g, 'text', { x: ox, y: gy + 40, class: 'capm' },
+     `${M.id} 위에 걸친 칸 ${above.length}개(진한 회색)가 모두 다른 칸에도 걸쳐 있어서, 빈자리를 건너 하중을 옆으로 넘긴다.`);
+}
+
 window.__done = true;
 </script>
 </body>

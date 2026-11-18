@@ -242,10 +242,19 @@ function addWindow(scene, cx, sill) {
 async function shelfScene(books) {
   const scene = new THREE.Scene(); scene.background = new THREE.Color(COL.bg);
   const world = worldGroup(); scene.add(world);
+  const emptyIds = (P.get('empty') || '').split(',').filter(Boolean);
   for (const b of books) {
-    const u = await makeUnit(b, { frameOnly: !!P.get('frames') });
+    const u = await makeUnit(b, { frameOnly: !!P.get('frames') || emptyIds.includes(b.id) });
     u.position.set(...b.pos);
     world.add(u);
+  }
+  // 괴임 블록 (엇쌓기 배치에서 높이 차이를 메운다)
+  for (const q of layout.shims || []) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(q.X, q.Y, q.H),
+      new THREE.MeshStandardMaterial({ color: COL.wedge, roughness: 0.6 }));
+    m.position.set(q.x + q.X / 2, -q.Y / 2, q.z + q.H / 2);
+    m.castShadow = m.receiveShadow = true;
+    world.add(m);
   }
   const box = new THREE.Box3().setFromObject(world);
   addRoom(scene);
@@ -540,6 +549,17 @@ if (VIEW === 'close') {
   const id = P.get('id');
   const idx = layout.books.findIndex(b => b.id === id);
   const focus = new THREE.Box3().setFromObject(world.children[idx]);
+  for (const other of (P.get('ids') || '').split(',').filter(Boolean))
+    focus.union(new THREE.Box3().setFromObject(world.children[layout.books.findIndex(b => b.id === other)]));
+  // 책을 뺀 칸: 책이 있던 자리를 점선으로
+  const emptyIds = (P.get('empty') || '').split(',').filter(Boolean);
+  for (const eid of emptyIds) {
+    const b = layout.books.find(x => x.id === eid), d = b.dims;
+    const ghost = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(b.t, b.w, b.h)),
+      new THREE.LineDashedMaterial({ color: 0xE2572B, dashSize: 6, gapSize: 4 }));
+    ghost.position.set(b.pos[0] + d.sx + C.clear_t + b.t / 2, b.pos[1] + b.w / 2, b.pos[2] + d.pz + C.lift + b.h / 2);
+    ghost.computeLineDistances(); world.add(ghost);
+  }
   focus.expandByVector(new THREE.Vector3(+(P.get('ex') || 60), +(P.get('ey') || 60), 0));
   focus.min.y -= +(P.get('below') || 120);
   addLights(scene, box, [-0.8, 1.2, 0.9], 2.4);
@@ -548,6 +568,11 @@ if (VIEW === 'close') {
   tighten(cam, focus);
   studioEnv(r, scene, +(P.get('env') || 0.8));
   renderFinal(r, scene, cam);
+  for (const eid of emptyIds) {
+    const b = layout.books.find(x => x.id === eid), d = b.dims;
+    labels([{ at: [b.pos[0] + d.X / 2, b.pos[1], b.pos[2] + d.Z * 0.45], dx: -150, dy: 60, accent: true,
+              text: '<b>책을 뺀 칸</b><br>위 칸은 양옆 칸으로 하중을 넘긴다' }], cam, { x: 0, y: 0, w: W, h: H }, world);
+  }
 }
 
 window.__done = true;

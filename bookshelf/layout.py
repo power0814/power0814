@@ -115,6 +115,77 @@ def place(books, width_mm, max_h=1500, heavy_low=True):
     return placed
 
 
+def place_bond(books, width_mm, max_h=1500, heavy_low=True, max_shim=40, min_share=0.25,
+               deep_min=0.75, weight_ratio=0.5):
+    """엇쌓기: 바닥이 아닌 곳의 칸은 아래 칸 두 개 이상에 걸쳐야 한다.
+
+    벽돌을 엇갈려 쌓듯, 위 칸이 아래 칸 사이 줄눈을 덮게 한다. 그러면 아래 책 하나가 빠져도
+    위 칸이 빈자리를 건너 옆 칸으로 하중을 넘긴다. 아래 칸들의 윗면 높이가 다르면, 차이가
+    max_shim 이하일 때 10 mm 단위 괴임 블록으로 메운다. 받치는 칸마다 위 칸 폭의 min_share
+    이상을 받쳐야 하고, 받치는 칸은 위 칸 무게의 절반 이상이어야 한다.
+    """
+    nx = 400
+    ny = int(max(b["dims"]["Y"] for b in books) // GRID)
+    hmap = np.zeros((nx, ny), dtype=int)
+    top = np.full((nx, ny), -1, dtype=int)            # -1 = 바닥
+    limit = width_mm // GRID
+    placed, shims = [], []
+    for i, b in enumerate(books):
+        d = b["dims"]
+        X, Y, Z = int(d["X"] // GRID), int(d["Y"] // GRID), int(d["Z"])
+        while True:
+            best = None
+            for x0 in range(0, limit - X + 1):
+                foot = hmap[x0:x0 + X, 0:Y]
+                own = top[x0:x0 + X, 0:Y]
+                base = int(foot.max())
+                if base + Z > max_h:
+                    continue
+                sup, cost = [], 0
+                if base > 0:
+                    if heavy_low and base > base_cap(b["kg"], max_h):
+                        continue
+                    contact = foot >= base - max_shim
+                    xs = np.where(contact.any(axis=1))[0]
+                    ys = np.where(contact.any(axis=0))[0]
+                    if not (xs.min() + 0.25 <= X / 2 <= xs.max() + 1 - 0.25
+                            and ys.max() + 1 >= deep_min * Y and contact.sum() >= 0.4 * X * Y):
+                        continue
+                    ok = True
+                    for o in np.unique(own[contact]):
+                        cells = (own == o) & contact
+                        cols = np.where(cells.any(axis=1))[0]
+                        rows = np.where(cells.any(axis=0))[0]
+                        share = len(cols) / X
+                        h_o = int(foot[cells].max())
+                        if share < min_share:
+                            continue
+                        if heavy_low and o >= 0 and placed[o]["kg"] < weight_ratio * b["kg"]:
+                            ok = False
+                            break
+                        sup.append((int(o), cols, rows, h_o))
+                        cost += (base - h_o) * int(cells.sum())
+                    if not ok or len(sup) < 2:
+                        continue
+                cand = (base, cost, x0, sup)
+                if best is None or cand[:3] < best[:3]:
+                    best = cand
+            if best:
+                break
+            limit += X
+        base, cost, x0, sup = best
+        for o, cols, rows, h_o in sup:
+            if h_o < base:
+                shims.append({"x": (x0 + int(cols.min())) * GRID, "X": len(cols) * GRID,
+                              "Y": (int(rows.max()) + 1) * GRID, "z": h_o, "H": base - h_o,
+                              "under": placed[o]["id"] if o >= 0 else "floor", "over": b["id"]})
+        hmap[x0:x0 + X, 0:Y] = base + Z
+        top[x0:x0 + X, 0:Y] = i
+        placed.append({**b, "pos": [x0 * GRID, -d["Y"], base],
+                       "supports": [placed[o]["id"] if o >= 0 else "floor" for o, *_ in sup]})
+    return placed, shims
+
+
 def write_assembly(placed, path):
     lines = [
         "// layout.py가 만든 파일. 수정은 books.json에서.",
@@ -161,6 +232,10 @@ def main():
     ap.add_argument("--lay-landscape", action="store_true", help="가로형(w > h) 책을 모두 눕혀 꽂는다")
     ap.add_argument("--assembly", default=str(HERE / "assembly.scad"))
     ap.add_argument("--skeletal", action="store_true", help="골조형 모듈 (윗판·바닥판·뒷벽에 갈빗대만)")
+    ap.add_argument("--bond", action="store_true", help="엇쌓기: 위 칸은 아래 칸 두 개 이상에 걸친다")
+    ap.add_argument("--max-shim", type=int, default=40, help="괴임 블록 최대 높이 (mm)")
+    ap.add_argument("--deep-min", type=float, default=0.75, help="받침이 덮어야 할 깊이 비율")
+    ap.add_argument("--weight-ratio", type=float, default=0.5, help="엇쌓기: 받치는 칸의 최소 무게 비율")
     args = ap.parse_args()
 
     books = json.loads(Path(args.books).read_text())["books"]
@@ -174,12 +249,17 @@ def main():
         for b, d in zip(books, ex.map(module_dims, books)):
             b["dims"] = d
 
-    placed = place(books, args.width, args.max_height, not args.no_heavy_low)
+    shims = []
+    if args.bond:
+        placed, shims = place_bond(books, args.width, args.max_height, not args.no_heavy_low,
+                                   args.max_shim, deep_min=args.deep_min, weight_ratio=args.weight_ratio)
+    else:
+        placed = place(books, args.width, args.max_height, not args.no_heavy_low)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     (out / "layout.json").write_text(json.dumps(
         {"grid": GRID, "max_height": args.max_height, "heavy_low": not args.no_heavy_low,
-         "books": placed}, ensure_ascii=False, indent=1))
+         "bond": args.bond, "books": placed, "shims": shims}, ensure_ascii=False, indent=1))
     write_assembly(placed, Path(args.assembly))
 
     for p in placed:
@@ -194,6 +274,10 @@ def main():
     com = sum(p["kg"] * (p["pos"][2] + p["dims"]["Z"] / 2) for p in placed) / kg
     print(f"전체 폭 {xmax:.0f} mm, 높이 {zmax:.0f} mm, 책 무게 합 {kg:.1f} kg, "
           f"책 무게중심 높이 {com:.0f} mm")
+    if args.bond:
+        ups = [p for p in placed if p["pos"][2] > 0]
+        print(f"위 칸 {len(ups)}개 모두 두 칸 이상에 걸침, 괴임 {len(shims)}개 "
+              f"(높이 {sorted(set(s['H'] for s in shims))} mm)")
 
     if args.stl:
         stl = Path(args.stl)
