@@ -694,7 +694,7 @@ if (VIEW === 'rods') {
   for (const eid of (P.get('empty') || '').split(',').filter(Boolean)) {
     const q = layout.books.find(x => x.id === eid), d = q.dims;
     labels([{ at: [q.pos[0] + d.X / 2, -d.Y, q.pos[2] + d.Z * 0.45], dx: -150, dy: 70, accent: true,
-              text: '<b>책을 뺀 칸</b><br>위 칸은 이어진 골조로 옆 칸에 하중을 넘긴다' }], cam, { x: 0, y: 0, w: W, h: H }, world);
+              text: '<b>책을 뺀 칸</b><br>이 칸의 골조가 위 칸 하중을 그대로 받는다 (책은 처음부터 하중을 받지 않았다)' }], cam, { x: 0, y: 0, w: W, h: H }, world);
   }
   console.log('rods', frame.userData.rods, 'nodes', frame.userData.nodes);
 }
