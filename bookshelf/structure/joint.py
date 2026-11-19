@@ -74,9 +74,9 @@ def label(x, y, tx, ty, text, sub=None):
 RX = Y(270)
 label(Y(120), Z(z_book + 20), RX, Z(z_book + 32), "위 책", "발이 쐐기 위에 선다")
 label(Y(y0 + w_up + 10), Z(z_floor + 10), RX, Z(z_floor + 12), "쐐기 · 앞으로 당겨 뺀다", "빼면 책이 2 mm 내려가 덮개에서 떨어진다")
-label(Y(60), Z(z_floor + 2), RX, Z(z_floor - 6), "받침 · 막대 위에 끼운다", "책을 빼도 남는다")
-label(Y(rows_low[-1]), Z(zc), RX, Z(zc - 18), f"막대 Ø{2 * r:.0f} · 줄눈 보", f"벽에서 {', '.join(str(int(v)) for v in rows_low)} mm")
-label(Y(130), Z(2), RX, Z(-26), "덮개 · 막대를 아래에서 감싼다 (클립)", "막대 줄들을 가로로 묶는다 · 책을 빼도 남는다")
+label(Y(60), Z(z_floor + 2), RX, Z(z_floor - 6), "받침 · 막대 위에 끼운다 (같은 클립)", "책을 빼도 남는다")
+label(Y(rows_low[-1]), Z(zc), RX, Z(zc - 18), "막대 · 줄눈 보 (출력이면 PETG Ø16)", f"벽에서 {', '.join(str(int(v)) for v in rows_low)} mm · 그림은 Ø{2 * r:.0f}")
+label(Y(130), Z(2), RX, Z(-26), "덮개 · 막대를 감싸는 클립, 위아래 유격 0.2 mm", "누를 땐 홈에 앉고, 0.2 mm 넘게 들리면 걸린다 · 책을 빼도 남는다")
 label(Y(150), Z(-25), RX, Z(-50), "아래 책", "머리가 덮개를 받친다 (압축만)")
 o.append(f'<text x="{Y(-6)}" y="{Z(-55) + 18}" class="legm" text-anchor="middle">벽</text>')
 

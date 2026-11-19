@@ -72,7 +72,7 @@ def panel(L, ox, oy, title, sub, fill, labels, removed=(), defl=None, note=None)
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--layout", default=str(ROOT / "out/runs/layout.json"))
-    ap.add_argument("--mat", default="petg12")
+    ap.add_argument("--mat", default="petg16")
     ap.add_argument("--remove", default="04,20")
     ap.add_argument("--out", default=str(ROOT / "out/runs/fig_load.html"))
     a = ap.parse_args()
@@ -90,7 +90,8 @@ def main():
         fill=lambda b: mix("#ECE8E0", "#2F3A37", min(1.0, F0.get(b["id"], 0) / fmax) ** 0.7),
         labels=lambda b: f'{F0.get(b["id"], 0):.0f} N' if F0.get(b["id"], 0) >= 8 else "",
         note=[f"책·받침·덮개·막대 합계 {base['load_total'] / 9.81:.1f} kg",
-              f"막대 최대 휨응력 {base['sigma_max']:.2f} MPa"]))
+              f"막대 최대 휨응력 {base['sigma_max']:.2f} MPa",
+              f"막대 {MD.MATS[a.mat]['name']} · 클립 유격 0.2 mm · 장기 하중"]))
     for k, rid in enumerate(a.remove.split(",")):
         res = case(L, a.mat, removed={rid})
         F1 = res["head_force"]

@@ -87,7 +87,7 @@ def face_pts(b, P):
 
 
 def build(L, mat="petg12", removed=(), k_c=5000.0, long_term=True, gaps=None, snap=0.5,
-          detail="clip", k_clip=5000.0, play=0.5, ground=1e-12):
+          detail="clip", k_clip=5000.0, play=0.2, ground=1e-12):
     """gaps: callable(kind, book_id, y, x) → 초기 틈 (mm). 없으면 모두 0 (완벽한 맞춤).
     snap: 이 거리(mm) 안의 막대 절점은 하나로 합친다 (아주 짧은 요소가 강성 행렬을 망치지 않게).
     play: 클립의 상하 유격 (mm). 0 이면 클립이 양방향으로 꽉 잡는다. 0 보다 크면 막대가 홈에 앉아 누를 때는
