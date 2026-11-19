@@ -168,63 +168,116 @@ class Model:
                 return -A / C
             raise Unstable("energy unbounded along the search direction: a part has no support")
 
-        u = np.zeros(self.n)
-        prev_set, prev_exact, last_t = None, False, 0.0
-        Ehist, flat = [], False
         scaleF = np.abs(F).max() + 1e-30
-        for it in range(max_iter):
-            p, phi = parts(u)
-            grad = K0 @ u - F - BT(kk * phi)
-            # 에너지의 조각 경계(p = 0)와 똑같이 나눈다
-            act = np.where(comp, p >= 0.0, True)
-            # 끝: 바로 앞 걸음이 그 접촉 상태의 정확한 뉴턴 걸음이었고 (정확한 선 탐색에서 t = 1),
-            # 걸음 뒤에도 접촉 상태가 그대로면 지금 점은 그 2차 조각의 정확한 최솟점이다 (유한 종료).
-            if prev_exact and abs(last_t - 1.0) < 1e-9 and np.array_equal(act, prev_set):
-                break
-            # 무차별 평형 (접지 스프링을 끈 경우에만 생긴다): 강체가 대각선 두 점에만 닿고 무게중심이 그 대각선
-            # 위에 있으면 그 축 회전은 에너지 0 이다. 접촉 길이·막대 변형이 그대로라 힘과 응력은 같다.
-            # 에너지가 더 줄지 않고 잔차가 충분히 작으면 해로 받아들이고 표시한다.
-            Ehist.append(energy(u))
-            if len(Ehist) > 20:
-                dE = Ehist[-21] - Ehist[-1]
-                Hd0 = np.abs(np.diag(K0 + BtWB(kk * act))[free]).max()
-                if dE <= 1e-12 * abs(Ehist[-1]) and \
-                        np.abs(grad[free]).max() <= 1e-8 * (Hd0 * np.abs(u).max() + scaleF):
-                    flat = True
-                    break
-            # 걸음 방향.
-            # - 첫 걸음: 모든 접촉이 닿았다고 본다 (초기 틈이 있으면 u = 0 에서 모두 떨어져 있어 부재가 허공에 뜬다).
-            # - 접촉 상태가 바뀌는 중: 떨어진 접촉의 강성을 1e-3 배로 살짝 넣어 '곧 닿을 곳' 쪽으로 방향을 잡는다.
-            # - 접촉 상태가 그대로: 정확한 헤세 행렬 (종료 판정에 필요).
-            if it == 0:
-                Hset, w = np.ones_like(act), kk.copy()
-            elif prev_set is not None and not np.array_equal(act, prev_set):
-                Hset, w = act, kk * act + 1e-3 * kk * (comp & ~act)
-            else:
-                Hset, w = act, kk * act
-            exact = it > 0 and np.array_equal(w, kk * act)
-            H = K0 + BtWB(w)
-            gf, Hf = grad[free], H[np.ix_(free, free)]
+
+        def solve_free(H, g, extra=None):
+            """H s = −g (자유 자유도). 수치적으로 특이하면 떨어진 접촉 강성 1e-3 배 + 아주 작은 대각으로 정칙화."""
+            Hf, gf = H[np.ix_(free, free)], g[free]
             try:
                 Lc = np.linalg.cholesky(Hf)
                 if ((np.diag(Lc) ** 2) / np.maximum(np.diag(Hf), 1e-300)).min() < 1e-14:
                     raise np.linalg.LinAlgError
-                sf = np.linalg.solve(Hf, -gf)
+                return np.linalg.solve(Hf, -gf), True
             except np.linalg.LinAlgError:
-                Hr = (H + BtWB(1e-3 * kk * (comp & ~act)))[np.ix_(free, free)]
+                Hr = (H + (extra if extra is not None else 0.0))[np.ix_(free, free)]
                 reg = 1e-12 * max(np.abs(np.diag(Hr)).max(), 1.0)
-                sf = np.linalg.solve(Hr + reg * np.eye(len(free)), -gf); exact = False
-            if gf @ sf >= 0:                      # 수치적으로 하강 방향이 아니면 경사 방향
-                sf, exact = -gf, False
-            s = np.zeros(self.n); s[free] = sf
-            t = line_min(u, s)
-            u = u + t * s
-            prev_set, prev_exact, last_t = Hset, exact, t
+                return np.linalg.solve(Hr + reg * np.eye(len(free)), -gf), False
+
+        def diverged(u):
             # 이 책장에서 실제 변위는 수 mm, 회전은 0.01 rad 수준이다. 100 (mm 또는 rad) 을 넘으면 받침이 모자란 것이다.
-            if not np.all(np.isfinite(u)) or np.abs(u).max() > 100.0:
-                raise Unstable(f"no stable support (iteration {it}, max |u| {np.abs(u).max():.3g})")
-        else:
-            raise RuntimeError("Newton did not converge")
+            return not np.all(np.isfinite(u)) or np.abs(u).max() > 100.0
+
+        def active_set(u, max_it, first_all):
+            """정확한 활성 집합 뉴턴 + 정확한 선 탐색. (u, 상태, 반복 수). 상태: exact | flat | stuck"""
+            prev_set, prev_exact, last_t, Ehist = None, False, 0.0, []
+            for it in range(max_it):
+                p, phi = parts(u)
+                grad = K0 @ u - F - BT(kk * phi)
+                act = np.where(comp, p >= 0.0, True)        # 에너지의 조각 경계(p = 0)와 똑같이 나눈다
+                # 끝: 바로 앞 걸음이 그 접촉 상태의 정확한 뉴턴 걸음이었고 (정확한 선 탐색에서 t = 1),
+                # 걸음 뒤에도 접촉 상태가 그대로면 지금 점은 그 2차 조각의 정확한 최솟점이다 (유한 종료).
+                if prev_exact and abs(last_t - 1.0) < 1e-9 and np.array_equal(act, prev_set):
+                    return u, "exact", it
+                # 무차별 평형 (접지 스프링을 끈 경우에만 생긴다): 강체가 대각선 두 점에만 닿고 무게중심이 그 대각선
+                # 위에 있으면 그 축 회전은 에너지 0 이다. 접촉 길이·막대 변형이 그대로라 힘과 응력은 같다.
+                # 에너지가 더 줄지 않고 잔차가 충분히 작으면 해로 받아들이고 표시한다.
+                Ehist.append(energy(u))
+                if len(Ehist) > 20:
+                    dE = Ehist[-21] - Ehist[-1]
+                    Hd0 = np.abs(np.diag(K0 + BtWB(kk * act))[free]).max()
+                    if dE <= 1e-12 * abs(Ehist[-1]) and \
+                            np.abs(grad[free]).max() <= 1e-8 * (Hd0 * np.abs(u).max() + scaleF):
+                        return u, "flat", it
+                # 걸음 방향.
+                # - 첫 걸음: 모든 접촉이 닿았다고 본다 (초기 틈이 있으면 u = 0 에서 모두 떨어져 있어 부재가 허공에 뜬다).
+                # - 접촉 상태가 바뀌는 중: 떨어진 접촉의 강성을 1e-3 배로 살짝 넣어 '곧 닿을 곳' 쪽으로 방향을 잡는다.
+                # - 접촉 상태가 그대로: 정확한 헤세 행렬 (종료 판정에 필요).
+                if it == 0 and first_all:
+                    Hset, w = np.ones_like(act), kk.copy()
+                elif prev_set is not None and not np.array_equal(act, prev_set):
+                    Hset, w = act, kk * act + 1e-3 * kk * (comp & ~act)
+                else:
+                    Hset, w = act, kk * act
+                exact = not (it == 0 and first_all) and np.array_equal(w, kk * act)
+                sf, ok = solve_free(K0 + BtWB(w), grad, BtWB(1e-3 * kk * (comp & ~act)))
+                exact = exact and ok
+                if grad[free] @ sf >= 0:                  # 수치적으로 하강 방향이 아니면 경사 방향
+                    sf, exact = -grad[free], False
+                s = np.zeros(self.n); s[free] = sf
+                t = line_min(u, s)
+                u = u + t * s
+                prev_set, prev_exact, last_t = Hset, exact, t
+                if diverged(u):
+                    raise Unstable(f"no stable support (max |u| {np.abs(u).max():.3g})")
+            return u, "stuck", max_it
+
+        def smooth(u, mu, max_it=60):
+            """max(p, 0) 의 꺾인 곳을 반지름 mu (mm) 로 둥글린 에너지를 뉴턴 + 아르미호로 최소화.
+            φ_μ(p) = (p + √(p² + μ²)) / 2 — 볼록, 매끄럽다. μ 를 줄여 가며 쓴다."""
+            def parts_mu(u):
+                p = -(B @ u) - g0
+                r = np.sqrt(p * p + mu * mu)
+                ph = np.where(comp, 0.5 * (p + r), p)
+                d1 = np.where(comp, 0.5 * (1.0 + p / r), 1.0)
+                d2 = np.where(comp, 0.5 * mu * mu / r ** 3, 0.0)
+                return ph, d1, d2
+
+            def e_mu(u):
+                ph, _, _ = parts_mu(u)
+                return 0.5 * u @ (K0 @ u) - F @ u + 0.5 * np.sum(kk * ph * ph)
+            for it in range(max_it):
+                ph, d1, d2 = parts_mu(u)
+                grad = K0 @ u - F - BT(kk * ph * d1)
+                if np.abs(grad[free]).max() <= 1e-10 * scaleF:
+                    return u, it
+                sf, _ = solve_free(K0 + BtWB(kk * (d1 * d1 + ph * d2)), grad)
+                gs = grad[free] @ sf
+                if gs >= 0:
+                    sf, gs = -grad[free], -(grad[free] @ grad[free])
+                E0, t = e_mu(u), 1.0
+                while t > 1e-14:
+                    un = u.copy(); un[free] += t * sf
+                    if e_mu(un) <= E0 + 1e-4 * t * gs:
+                        break
+                    t *= 0.5
+                u = un
+                if diverged(u):
+                    raise Unstable(f"no stable support (max |u| {np.abs(u).max():.3g})")
+            return u, max_it
+
+        # 1) 빠른 길: 정확한 활성 집합법. 대부분 여기서 정확히 끝난다.
+        u, status, total = active_set(np.zeros(self.n), 30, first_all=True)
+        # 2) 경계에 걸린 접촉이 켜졌다 꺼졌다 하며 걸음이 정확해지지 못하면: 매끄럽게 둥글린 에너지로 해 가까이 간 뒤
+        # 3) 정확한 활성 집합법으로 다듬는다. 끝 판정은 1) 과 같으므로 최종 해는 여전히 정확한 해다.
+        if status == "stuck":
+            for mu in (1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6, 1e-7):
+                u, n2 = smooth(u, mu); total += n2
+            u, status, n3 = active_set(u, max_iter, first_all=False)
+            total += n3
+            if status == "stuck":
+                raise RuntimeError("Newton did not converge")
+        flat = status == "flat"
+        it = total - 1
         p, phi = parts(u)
         f = kk * phi
         act = np.where(comp, p > 0.0, True)
