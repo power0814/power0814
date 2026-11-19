@@ -25,6 +25,11 @@ class Model:
         self.springs = []    # dict(terms, k, g0, comp, tag)
         self.F = []          # 절점 하중 (리스트로 쌓고 해석 때 배열로)
         self.fixed = set()
+        # 모든 자유도에 거는 아주 약한 접지 스프링. 자유도마다 (모든 접촉을 닫은 강성 행렬의 그 자유도 대각값) × ground.
+        # (자유도마다 단위가 달라서 — mm 와 rad — 전체 최댓값 하나로 정하면 안 된다.)
+        # 0 이 아니면 강성 행렬이 늘 정칙이라 뉴턴 걸음이 언제나 정확하고, 진짜 메커니즘은 변위 ≈ 하중/접지강성
+        # 으로 곧바로 발산해 드러난다. 이 스프링이 받은 힘은 결과의 ground_f 로 돌려주어 평형 검사에 넣는다.
+        self.ground = 0.0
 
     # ---- 구성 ----
     def dofs(self, k: int) -> list[int]:
@@ -74,7 +79,7 @@ class Model:
         전체 퍼텐셜 에너지
             Π(u) = ½ uᵀK u − Fᵀu + Σ ½ k φ(p)²,  p = −c·u − g0,  φ = max(p, 0) (압축 전용) 또는 p (양방향)
         는 볼록하고 한 번 미분 가능한 조각별 2차식이다. 그 최솟점이 평형이며, 압축 전용 조건(인장 없음, 떨어진 곳은
-        파고들지 않음)을 저절로 만족한다. 감쇠 뉴턴법 + 아르미호 선 탐색으로 최솟점을 찾는다.
+        파고들지 않음)을 저절로 만족한다. 뉴턴 방향 + 정확한 선 탐색으로 최솟점을 찾는다.
 
         받침이 모자라면 (메커니즘에 하중이 걸리면) Π 가 아래로 끝없이 내려가 변위가 발산한다 → Unstable.
         """
@@ -82,10 +87,38 @@ class Model:
         F = np.array(self.F, float)
         free = np.array([i for i in range(self.n) if i not in self.fixed], int)
         ns = len(self.springs)
-        B = np.zeros((ns, self.n))
+        kg = np.zeros(self.n)
+        if self.ground:
+            dall = np.diag(K0).copy()
+            for s in self.springs:
+                for d1, c1 in s['terms'].items():
+                    dall[d1] += s['k'] * c1 * c1
+            kg[free] = self.ground * np.maximum(np.abs(dall[free]), 1e-30)
+            K0[free, free] += kg[free]
+        # 접촉 행렬 B (스프링 × 자유도)는 아주 성기다 (스프링마다 자유도 7개 이하). 색인 배열로 다룬다.
+        mt = max((len(s['terms']) for s in self.springs), default=1)
+        IDX = np.zeros((ns, mt), int); VAL = np.zeros((ns, mt))
         for i, s in enumerate(self.springs):
-            for d, c in s['terms'].items():
-                B[i, d] += c
+            for j, (d, c) in enumerate(s['terms'].items()):
+                IDX[i, j] = d; VAL[i, j] = c
+        PAIR = (IDX[:, :, None] * self.n + IDX[:, None, :]).reshape(ns, mt * mt)   # (i, j) 쌍의 평탄 색인
+        VV = (VAL[:, :, None] * VAL[:, None, :]).reshape(ns, mt * mt)
+
+        class _B:
+            """B @ u, B.T @ v, B.T diag(w) B 만 쓴다."""
+            T = None
+
+            def __matmul__(self, u):
+                return (VAL * u[IDX]).sum(1)
+        Bm = _B()
+
+        def BT(v):
+            return np.bincount(IDX.ravel(), weights=(VAL * v[:, None]).ravel(), minlength=self.n)
+
+        def BtWB(w):
+            return np.bincount(PAIR.ravel(), weights=(VV * w[:, None]).ravel(),
+                               minlength=self.n * self.n).reshape(self.n, self.n)
+        B = Bm
         g0 = np.array([s['g0'] for s in self.springs]) if ns else np.zeros(0)
         kk = np.array([s['k'] for s in self.springs]) if ns else np.zeros(0)
         comp = np.array([s['comp'] for s in self.springs], bool) if ns else np.zeros(0, bool)
@@ -99,63 +132,96 @@ class Model:
             _, phi = parts(u)
             return 0.5 * u @ (K0 @ u) - F @ u + 0.5 * np.sum(kk * phi * phi)
 
+        def line_min(u, s):
+            """u + t·s 위에서 에너지의 정확한 최솟점 t (≥ 0). 에너지는 t 에 대해 조각별 2차식이고,
+            기울기 D(t) 는 단조 증가하는 조각별 1차식이다. 접촉이 열리고 닫히는 점을 차례로 지나며 D = 0 을 찾는다."""
+            p, _ = parts(u)
+            q = -(B @ s)
+            A = s @ (K0 @ u - F)
+            C = s @ (K0 @ s)
+            bil = ~comp
+            A += np.sum(kk[bil] * p[bil] * q[bil]); C += np.sum(kk[bil] * q[bil] ** 2)
+            on = comp & ((p > 0) | ((p == 0) & (q > 0)))
+            A += np.sum(kk[on] * p[on] * q[on]); C += np.sum(kk[on] * q[on] ** 2)
+            tb = np.full(ns, np.inf)
+            mk = comp & (q != 0)
+            tb[mk] = -p[mk] / q[mk]
+            ev = np.where(mk & (tb > 0))[0]
+            Cscale = abs(C) + np.sum(kk * q * q) + 1e-300
+            t_prev = 0.0
+            for i in ev[np.argsort(tb[ev])]:
+                ti = tb[i]
+                if A + C * t_prev >= 0:              # 구간 시작에서 이미 오르막: 최솟점은 구간 시작
+                    return t_prev
+                if A + C * ti >= 0:                  # 이 구간 안에서 D = 0 (C > 0 일 수밖에 없다)
+                    return -A / C
+                if q[i] < 0:                          # 닫혀 있던 접촉이 열린다
+                    A -= kk[i] * p[i] * q[i]; C -= kk[i] * q[i] ** 2
+                else:                                 # 열려 있던 접촉이 닫힌다
+                    A += kk[i] * p[i] * q[i]; C += kk[i] * q[i] ** 2
+                if abs(C) < 1e-12 * Cscale:           # 빼고 더하며 생긴 반올림
+                    C = 0.0
+                t_prev = ti
+            if A + C * t_prev >= 0:
+                return t_prev
+            if C > 0:
+                return -A / C
+            raise Unstable("energy unbounded along the search direction: a part has no support")
+
         u = np.zeros(self.n)
-        prev_act, prev_exact, last_t, inexact_run = None, False, 0.0, 0
+        prev_set, prev_exact, last_t = None, False, 0.0
         Ehist, flat = [], False
         scaleF = np.abs(F).max() + 1e-30
         for it in range(max_iter):
             p, phi = parts(u)
-            grad = K0 @ u - F - B.T @ (kk * phi)
-            # 무차별 평형: 강체가 대각선 두 점에만 닿고 무게중심이 그 대각선 위에 있으면 그 축 회전은 에너지 0 이다.
-            # 그 방향으로 움직여도 접촉 길이·막대 변형이 그대로라 힘과 응력은 같다. 에너지가 더 줄지 않고 잔차가
-            # 충분히 작으면 해로 받아들이고 표시한다.
+            grad = K0 @ u - F - BT(kk * phi)
+            # 에너지의 조각 경계(p = 0)와 똑같이 나눈다
+            act = np.where(comp, p >= 0.0, True)
+            # 끝: 바로 앞 걸음이 그 접촉 상태의 정확한 뉴턴 걸음이었고 (정확한 선 탐색에서 t = 1),
+            # 걸음 뒤에도 접촉 상태가 그대로면 지금 점은 그 2차 조각의 정확한 최솟점이다 (유한 종료).
+            if prev_exact and abs(last_t - 1.0) < 1e-9 and np.array_equal(act, prev_set):
+                break
+            # 무차별 평형 (접지 스프링을 끈 경우에만 생긴다): 강체가 대각선 두 점에만 닿고 무게중심이 그 대각선
+            # 위에 있으면 그 축 회전은 에너지 0 이다. 접촉 길이·막대 변형이 그대로라 힘과 응력은 같다.
+            # 에너지가 더 줄지 않고 잔차가 충분히 작으면 해로 받아들이고 표시한다.
             Ehist.append(energy(u))
-            if len(Ehist) > 20 and not prev_exact:
+            if len(Ehist) > 20:
                 dE = Ehist[-21] - Ehist[-1]
-                act_now = np.where(comp, p >= 0.0, True)
-                Hd0 = np.abs(np.diag(K0 + B.T @ (B * (kk * act_now)[:, None]))[free]).max()
+                Hd0 = np.abs(np.diag(K0 + BtWB(kk * act))[free]).max()
                 if dE <= 1e-12 * abs(Ehist[-1]) and \
                         np.abs(grad[free]).max() <= 1e-8 * (Hd0 * np.abs(u).max() + scaleF):
                     flat = True
                     break
-            # 에너지의 조각 경계(p = 0)와 똑같이 나눠야 아래 종료 판정이 정확하다. 하중이 전혀 없는 부재가 힘 0 으로
-            # 얹혀 있으면 무차별 평형이라 여기서 끝나지 않는다 (실제 모델은 모든 부재에 자중이 있다).
-            act = np.where(comp, p >= 0.0, True)
-            # 끝: 바로 앞 걸음이 정칙 행렬로 푼 온전한 뉴턴 걸음이었고 접촉 상태가 그대로면,
-            # 지금 점은 그 2차 조각의 정확한 최솟점이다 (조각별 2차 함수의 유한 종료).
-            if prev_exact and last_t == 1.0 and np.array_equal(act, prev_act):
-                break
-            # 첫 걸음은 모든 접촉이 닿았다고 보고 방향을 잡는다 (초기 틈이 있으면 u = 0 에서 모두 떨어져 있어
-            # 부재가 허공에 뜬 채로 시작하기 때문). 방향만 정할 뿐, 해의 정확성은 선 탐색과 종료 판정이 보장한다.
-            Hact = np.ones_like(act) if it == 0 else act
-            H = K0 + B.T @ (B * (kk * Hact)[:, None])
+            # 걸음 방향.
+            # - 첫 걸음: 모든 접촉이 닿았다고 본다 (초기 틈이 있으면 u = 0 에서 모두 떨어져 있어 부재가 허공에 뜬다).
+            # - 접촉 상태가 바뀌는 중: 떨어진 접촉의 강성을 1e-3 배로 살짝 넣어 '곧 닿을 곳' 쪽으로 방향을 잡는다.
+            # - 접촉 상태가 그대로: 정확한 헤세 행렬 (종료 판정에 필요).
+            if it == 0:
+                Hset, w = np.ones_like(act), kk.copy()
+            elif prev_set is not None and not np.array_equal(act, prev_set):
+                Hset, w = act, kk * act + 1e-3 * kk * (comp & ~act)
+            else:
+                Hset, w = act, kk * act
+            exact = it > 0 and np.array_equal(w, kk * act)
+            H = K0 + BtWB(w)
             gf, Hf = grad[free], H[np.ix_(free, free)]
             try:
                 Lc = np.linalg.cholesky(Hf)
-                if (np.diag(Lc) ** 2).min() < 1e-14 * np.diag(Hf).max():
+                if ((np.diag(Lc) ** 2) / np.maximum(np.diag(Hf), 1e-300)).min() < 1e-14:
                     raise np.linalg.LinAlgError
-                step = np.linalg.solve(Hf, -gf); exact = True
+                sf = np.linalg.solve(Hf, -gf)
             except np.linalg.LinAlgError:
-                # 받침이 모자란 부재가 있다: 떨어진 접촉의 강성을 1e-3 배로 살짝 넣어 '곧 닿을 곳' 쪽으로 걸음을 잡는다.
-                # (단위 행렬로 정칙화하면 방향이 물리적으로 엉뚱해져 선 탐색이 아주 작은 걸음만 받아들인다.)
-                Hr = H + B.T @ (B * (1e-3 * kk * (comp & ~Hact))[:, None])
-                Hr = Hr[np.ix_(free, free)]
+                Hr = (H + BtWB(1e-3 * kk * (comp & ~act)))[np.ix_(free, free)]
                 reg = 1e-12 * max(np.abs(np.diag(Hr)).max(), 1.0)
-                step = np.linalg.solve(Hr + reg * np.eye(len(free)), -gf); exact = False
-            E0, slope, t = energy(u), gf @ step, 1.0
-            if slope >= 0:
-                step, slope, exact = -gf, -(gf @ gf), False
-            while t > 1e-14:
-                un = u.copy(); un[free] += t * step
-                if energy(un) <= E0 + 1e-4 * t * slope:
-                    break
-                t *= 0.5
-            # 종료 판정은 '이 걸음을 계산할 때 쓴 접촉 상태'와 비교해야 한다
-            u, last_t, prev_act, prev_exact = un, t, Hact, exact
-            inexact_run = 0 if exact else inexact_run + 1
-            # 이 책장에서 실제 변위는 수 mm, 회전은 0.01 rad 수준이다. 100 (mm 또는 rad) 을 넘거나,
-            # 강성 행렬이 계속 특이해서 정칙화한 걸음만 200번 이어지면 받침이 모자란 것이다.
-            if not np.all(np.isfinite(u)) or np.abs(u).max() > 100.0 or inexact_run > 200:
+                sf = np.linalg.solve(Hr + reg * np.eye(len(free)), -gf); exact = False
+            if gf @ sf >= 0:                      # 수치적으로 하강 방향이 아니면 경사 방향
+                sf, exact = -gf, False
+            s = np.zeros(self.n); s[free] = sf
+            t = line_min(u, s)
+            u = u + t * s
+            prev_set, prev_exact, last_t = Hset, exact, t
+            # 이 책장에서 실제 변위는 수 mm, 회전은 0.01 rad 수준이다. 100 (mm 또는 rad) 을 넘으면 받침이 모자란 것이다.
+            if not np.all(np.isfinite(u)) or np.abs(u).max() > 100.0:
                 raise Unstable(f"no stable support (iteration {it}, max |u| {np.abs(u).max():.3g})")
         else:
             raise RuntimeError("Newton did not converge")
@@ -163,18 +229,20 @@ class Model:
         f = kk * phi
         act = np.where(comp, p > 0.0, True)
         # 잔차 검사
-        grad = K0 @ u - F - B.T @ f
-        Hd = np.abs(np.diag(K0 + B.T @ (B * kk[:, None]))[free]).max() if len(free) else 1.0
+        grad = K0 @ u - F - BT(f)
+        Hd = np.abs(np.diag(K0 + BtWB(kk))[free]).max() if len(free) else 1.0
         if np.abs(grad[free]).max() > 1e-8 * (Hd * np.abs(u).max() + scaleF):
             raise RuntimeError(f"residual {np.abs(grad[free]).max():.3e}")
         # 무차별 평형(하중이 없는 방향으로 강성 0) 여부: 경고용
-        Hf = (K0 + B.T @ (B * (kk * act)[:, None]))[np.ix_(free, free)]
+        Hf = (K0 + BtWB(kk * act))[np.ix_(free, free)]
         try:
             Lc = np.linalg.cholesky(Hf)
-            indifferent = bool((np.diag(Lc) ** 2).min() < 1e-14 * np.diag(Hf).max())
+            indifferent = bool(((np.diag(Lc) ** 2) / np.maximum(np.diag(Hf), 1e-300)).min() < 1e-14)
         except np.linalg.LinAlgError:
             indifferent = True
-        return dict(u=u, f=f, active=act, iterations=it + 1, indifferent=indifferent or flat)
+        gf = np.zeros(self.n)
+        gf[free] = -kg[free] * u[free]            # 접지 스프링이 구조를 받치는 힘 (위로 +). 아래로 처지면(u<0) 위로 민다
+        return dict(u=u, f=f, active=act, iterations=it + 1, indifferent=indifferent or flat, ground_f=gf)
 
     def beam_forces(self, u):
         """요소마다 (tag, L, V1, M1, V2, M2). 부재 끝에서 요소에 작용하는 힘."""

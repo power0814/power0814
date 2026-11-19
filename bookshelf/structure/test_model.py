@@ -61,7 +61,7 @@ def bridge(detail):
     그래서 같은 손계산이 맞아야 한다."""
     setup()
     L = layout()
-    m, info = MD.build(L, "test", removed={"m"}, k_c=1e9, k_clip=1e9, detail=detail)
+    m, info = MD.build(L, "test", removed={"m"}, k_c=1e9, k_clip=1e9, detail=detail, ground=0.0)
     pin_thin(m, info)
     r = m.solve()
     M = MD.MATS["test"]; A, I = MD.section(M)
@@ -99,7 +99,7 @@ def t_full_support_takes_load_directly():
 def full_support(detail):
     setup()
     L = layout()
-    m, info = MD.build(L, "test", k_c=1e6, detail=detail)
+    m, info = MD.build(L, "test", k_c=1e6, detail=detail, ground=0.0)
     pin_thin(m, info)
     r = m.solve(); res = MD.results(m, info, r)
     M = MD.MATS["test"]; A, _ = MD.section(M); q = M["rho"] * A * MD.G_ACC
@@ -127,7 +127,23 @@ def t_unsupported_detected():
         raise AssertionError(f"{detail}: missing support not detected")
 
 
-TESTS = [t_bridge_matches_hand_calc, t_full_support_takes_load_directly, t_unsupported_detected]
+def t_ground_springs_negligible():
+    """접지 스프링(해석기의 수치 장치)을 기본값으로 켜도 결과가 1e-4 안에서 같고, 받는 몫이 1e-6 미만이다."""
+    setup()
+    L = layout()
+    out = []
+    for g in (0.0, 1e-12):
+        m, info = MD.build(L, "test", removed={"m"}, k_c=1e6, k_clip=1e6, ground=g)
+        pin_thin(m, info)
+        r = m.solve(); res = MD.results(m, info, r)
+        assert res["equilibrium_error"] < 1e-9, res["equilibrium_error"]
+        out.append((res["rod_sag_max"], res["sigma_max"], res["ground_share"]))
+    close(out[1][0], out[0][0], rel=1e-4, what="sag with ground springs")
+    close(out[1][1], out[0][1], rel=1e-4, what="stress with ground springs")
+    assert out[1][2] < 1e-6, out[1][2]
+
+
+TESTS = [t_ground_springs_negligible, t_bridge_matches_hand_calc, t_full_support_takes_load_directly, t_unsupported_detected]
 
 if __name__ == "__main__":
     bad = 0

@@ -7,9 +7,10 @@ detail="plain"  막대가 홈에 얹혀 있기만 하다.
   책을 빼면 책·받침·쐐기가 빠지고 덮개는 막대에 걸려 남는다 (무게만 막대에).
 
 detail="clip"   덮개와 받침이 막대에 끼워져(스냅) 막대와 함께 남는다. 책과 쐐기만 빠진다.
-  덮개·받침 = 강체 (w, ax, ay). 막대와의 연결은 양방향(클립), 책과의 접촉은 압축만.
-  덮개는 줄의 모든 막대 줄을 가로로 묶어서, 막대 한 줄만 따로 시소처럼 들리지 못하게 한다.
-  클립에 걸리는 인장(뽑히는 힘)을 따로 보고한다.
+  덮개·받침 = 강체 (w, ax, ay). 책과의 접촉은 압축만.
+  막대와의 연결: play = 0 이면 양방향으로 꽉 잡는다. play > 0 이면 막대가 홈에 앉아 누를 때는 압축(seat),
+  play 보다 더 들릴 때만 걸쇠(latch)가 당긴다. 덮개는 줄의 모든 막대 줄을 가로로 묶어서, 막대 한 줄만 따로
+  시소처럼 들리지 못하게 한다. 클립에 걸리는 인장(뽑히는 힘)을 따로 보고한다.
 
 공통
 - 막대: 줄(run)마다, 막대 줄(y)마다 x 방향 연속보 (티모셴코). 절점은 막대 끝과 모든 접촉점.
@@ -86,9 +87,12 @@ def face_pts(b, P):
 
 
 def build(L, mat="petg12", removed=(), k_c=5000.0, long_term=True, gaps=None, snap=0.5,
-          detail="clip", k_clip=5000.0):
+          detail="clip", k_clip=5000.0, play=0.5, ground=1e-12):
     """gaps: callable(kind, book_id, y, x) → 초기 틈 (mm). 없으면 모두 0 (완벽한 맞춤).
-    snap: 이 거리(mm) 안의 막대 절점은 하나로 합친다 (아주 짧은 요소가 강성 행렬을 망치지 않게)."""
+    snap: 이 거리(mm) 안의 막대 절점은 하나로 합친다 (아주 짧은 요소가 강성 행렬을 망치지 않게).
+    play: 클립의 상하 유격 (mm). 0 이면 클립이 양방향으로 꽉 잡는다. 0 보다 크면 막대가 홈에 앉아 누를 때는
+          압축으로 받고, 막대가 그 거리보다 더 들릴 때만 걸쇠가 당긴다.
+    ground: 모든 자유도에 거는 아주 약한 접지 스프링, 최대 대각 강성에 대한 비 (해석기 설명 참고)."""
     P = L["params"]
     M = MATS[mat]
     A, I = section(M)
@@ -99,8 +103,9 @@ def build(L, mat="petg12", removed=(), k_c=5000.0, long_term=True, gaps=None, sn
     books = {b["id"]: b for b in L["books"]}
     runs = {r["id"]: r for r in L["runs"]}
     m = Model()
+    m.ground = ground
     info = dict(rods={}, books={}, caps={}, shoes={}, loads_total=0.0, EI=EI, A=A, I=I, c=M["D"] / 2, mat=M,
-                detail=detail)
+                detail=detail, vertical=[])
     gap = gaps or (lambda *a: 0.0)
 
     for rid, r in runs.items():
@@ -118,6 +123,7 @@ def build(L, mat="petg12", removed=(), k_c=5000.0, long_term=True, gaps=None, sn
             xs = merge_close(sorted(xs), snap)
             assert all(r["x0"] - 1e-9 <= x <= r["x1"] + 1e-9 for x in xs), (rid, y)
             nodes = [m.dofs(2) for _ in xs]
+            info["vertical"] += [n[0] for n in nodes]
             q = M["rho"] * A * G_ACC
             for (a, b), (x0, x1) in zip(zip(nodes, nodes[1:]), zip(xs, xs[1:])):
                 Le = x1 - x0
@@ -136,7 +142,16 @@ def build(L, mat="petg12", removed=(), k_c=5000.0, long_term=True, gaps=None, sn
 
     def body(W):
         d = m.dofs(3); m.load(d[0], -W); info["loads_total"] += W
+        info["vertical"].append(d[0])
         return d
+
+    def clip(terms, tag):
+        """클립. terms 는 d = (막대 쪽이 위) − (아래) 로, 누르면 d < 0."""
+        if play <= 0:
+            m.spring(terms, k_clip, comp=False, tag=("clip",) + tag)
+        else:
+            m.spring(terms, k_clip, comp=True, tag=("seat",) + tag)
+            m.spring({k: -v for k, v in terms.items()}, k_clip, g0=play, comp=True, tag=("latch",) + tag)
 
     def rel(top, bot, xc, yc, x, y):
         """d = w_top(x, y) − w_bot(x, y). top/bot: 강체 자유도 3개, 막대 처짐 자유도 하나, 또는 None(바닥)."""
@@ -188,8 +203,7 @@ def build(L, mat="petg12", removed=(), k_c=5000.0, long_term=True, gaps=None, sn
             cap = body(cap_kg * G_ACC); info["caps"][bid] = dict(dofs=cap)
         for y in crun["rows"]:
             for x in gauss2(b):
-                m.spring(rel(rod_w(b["run"], y, x), cap, xc, yc, x, y), k_clip, comp=False,
-                         tag=("clip_cap", bid, b["run"], y, x))
+                clip(rel(rod_w(b["run"], y, x), cap, xc, yc, x, y), ("cap", bid, b["run"], y, x))
         shoe = body(shoe_kg * G_ACC); info["shoes"][bid] = dict(dofs=shoe)
         if b["base"] is None:
             for x, y in face_pts(b, P):
@@ -198,8 +212,7 @@ def build(L, mat="petg12", removed=(), k_c=5000.0, long_term=True, gaps=None, sn
         else:
             for y in b["rows_below"]:
                 for x in gauss2(b):
-                    m.spring(rel(shoe, rod_w(b["base"], y, x), xc, yc, x, y), k_clip, comp=False,
-                             tag=("clip_shoe", bid, b["base"], y, x))
+                    clip(rel(shoe, rod_w(b["base"], y, x), xc, yc, x, y), ("shoe", bid, b["base"], y, x))
         if bid in removed:
             continue
         bk = body(b["kg"] * G_ACC); info["books"][bid] = dict(dofs=bk)
@@ -229,9 +242,11 @@ def results(m, info, r):
     u, f = r["u"], r["f"]
     out = dict(iterations=r["iterations"], indifferent=r.get("indifferent", False))
     floor = sum(fi for s, fi in zip(m.springs, f) if s["tag"] and s["tag"][0] == "floor")
+    ground = float(sum(r["ground_f"][d] for d in info["vertical"]))
     out["floor_reaction"] = floor
+    out["ground_share"] = abs(ground) / info["loads_total"]   # 접지 스프링이 받은 몫: 무시할 만해야 한다
     out["load_total"] = info["loads_total"]
-    out["equilibrium_error"] = abs(floor - info["loads_total"]) / info["loads_total"]
+    out["equilibrium_error"] = abs(floor + ground - info["loads_total"]) / info["loads_total"]
     smax, where = 0.0, None
     for tag, Lm, V1, M1, V2, M2 in m.beam_forces(u):
         for Mx in (M1, M2):
@@ -252,8 +267,9 @@ def results(m, info, r):
             head[tag[1]] += fi
         if s["comp"] and not act:
             lifted += 1
-        if tag and tag[0].startswith("clip") and -fi > clip_t:
-            clip_t, clip_where = -fi, tag
+        pull = -fi if (tag and tag[0] == "clip") else (fi if (tag and tag[0] == "latch") else 0.0)
+        if pull > clip_t:
+            clip_t, clip_where = pull, tag
     out["head_force"] = dict(head)
     out["lifted_contacts"] = lifted
     out["clip_tension_max"], out["clip_tension_where"] = clip_t, clip_where

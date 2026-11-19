@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 import model as MD  # noqa: E402
-from analyze import case, cap_drop, DROP, CLEAR  # noqa: E402
+from analyze import case, cap_drop, DROP, CLEAR  # noqa: E402  (figure uses the default detail)
 
 ROOT = Path(__file__).parent.parent
 S = 0.62            # px / mm
