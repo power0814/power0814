@@ -81,6 +81,38 @@ def gauss2(b):
     return [b["xc"] - h, b["xc"] + h]
 
 
+def gauss_seg(a, b):
+    """선 접촉 [a, b] 의 2점 가우스 위치 (아주 짧으면 가운데 한 점)."""
+    if b - a < 0.5:
+        return [(a + b) / 2]
+    c, h = (a + b) / 2, (b - a) / (2 * math.sqrt(3))
+    return [c - h, c + h]
+
+
+def shoe_segments(b, P):
+    """받침이 아래에서 딛는 구간: [(run 또는 None, [x...], rows)]. 계단형 받침이면 여러 개.
+    한 구간짜리는 예전과 같이 책 두께의 가우스점 (gauss2) 을 쓴다."""
+    sups = b.get("supports")
+    if not sups:
+        return [(b["base"], gauss2(b), b["rows_below"])]
+    if len(sups) == 1:
+        s = sups[0]
+        return [(s["run"], gauss2(b), s["rows"])]
+    lo, hi = b["x0"] + P["side"], b["x1"] - P["side"]
+    out = []
+    for s in sups:
+        a, c = max(s["x0"], lo), min(s["x1"], hi)
+        if c - a > 1e-9:
+            out.append((s["run"], gauss_seg(a, c), s["rows"]))
+    return out
+
+
+def pier_mass(p):
+    """기둥 질량 추정 (kg): 열린 사다리꼴 틀이라 꽉 찬 부피의 절반 × 부품 밀도."""
+    h = p["top"] - min(s["base"] for s in p["supports"])
+    return (p["x1"] - p["x0"]) * p["depth"] * h * PETG_PART * 0.5
+
+
 def face_pts(b, P):
     """책 머리·발 면의 접촉점: 두께 방향 가우스 2점 × 깊이 방향 앞뒤 끝에서 10 mm 안쪽."""
     return [(x, y) for y in (P["y0"] + 10.0, P["y0"] + b["w"] - 10.0) for x in gauss2(b)]
@@ -102,6 +134,9 @@ def build(L, mat="petg12", removed=(), k_c=5000.0, long_term=True, gaps=None, sn
     removed = set(removed)
     books = {b["id"]: b for b in L["books"]}
     runs = {r["id"]: r for r in L["runs"]}
+    piers = {p["id"]: p for p in L.get("piers", [])}
+    if piers and detail != "clip":
+        raise ValueError("piers are modelled only with the clip detail")
     m = Model()
     m.ground = ground
     info = dict(rods={}, books={}, caps={}, shoes={}, loads_total=0.0, EI=EI, A=A, I=I, c=M["D"] / 2, mat=M,
@@ -117,9 +152,18 @@ def build(L, mat="petg12", removed=(), k_c=5000.0, long_term=True, gaps=None, sn
             xs = {r["x0"], r["x1"]}
             for c in r["cells"]:
                 xs.update(gauss2(books[c]))
-            for c in r["upper"]:
-                if y in books[c]["rows_below"] and (detail == "clip" or c not in removed):
-                    xs.update(gauss2(books[c]))
+            for c in set(r["upper"]):
+                if detail == "plain" and c in removed:
+                    continue
+                for srun, sxs, srows in shoe_segments(books[c], P):
+                    if srun == rid and srows and y in srows:
+                        xs.update(sxs)
+            for pid in r.get("piers", []):
+                xs.update(gauss_seg(piers[pid]["x0"], piers[pid]["x1"]))
+            for pid in r.get("upper_piers", []):
+                for s in piers[pid]["supports"]:
+                    if s["run"] == rid:
+                        xs.update(gauss_seg(s["x0"], s["x1"]))
             xs = merge_close(sorted(xs), snap)
             assert all(r["x0"] - 1e-9 <= x <= r["x1"] + 1e-9 for x in xs), (rid, y)
             nodes = [m.dofs(2) for _ in xs]
@@ -205,14 +249,16 @@ def build(L, mat="petg12", removed=(), k_c=5000.0, long_term=True, gaps=None, sn
             for x in gauss2(b):
                 clip(rel(rod_w(b["run"], y, x), cap, xc, yc, x, y), ("cap", bid, b["run"], y, x))
         shoe = body(shoe_kg * G_ACC); info["shoes"][bid] = dict(dofs=shoe)
-        if b["base"] is None:
-            for x, y in face_pts(b, P):
-                m.spring(rel(shoe, None, xc, yc, x, y), k_c / 2, g0=gap("floor", bid, y, x),
-                         tag=("floor", bid, None, y, x))
-        else:
-            for y in b["rows_below"]:
-                for x in gauss2(b):
-                    clip(rel(shoe, rod_w(b["base"], y, x), xc, yc, x, y), ("shoe", bid, b["base"], y, x))
+        for srun, sxs, srows in shoe_segments(b, P):
+            if srun is None:
+                for y in (P["y0"] + 10.0, P["y0"] + b["w"] - 10.0):
+                    for x in sxs:
+                        m.spring(rel(shoe, None, xc, yc, x, y), k_c / 2, g0=gap("floor", bid, y, x),
+                                 tag=("floor", bid, None, y, x))
+            else:
+                for y in srows:
+                    for x in sxs:
+                        clip(rel(shoe, rod_w(srun, y, x), xc, yc, x, y), ("shoe", bid, srun, y, x))
         if bid in removed:
             continue
         bk = body(b["kg"] * G_ACC); info["books"][bid] = dict(dofs=bk)
@@ -222,6 +268,27 @@ def build(L, mat="petg12", removed=(), k_c=5000.0, long_term=True, gaps=None, sn
                          tag=("cap", bid, b["run"], y, x))
             m.spring(rel(bk, shoe, xc, yc, x, y), k_c / 2, g0=gap("shoe", bid, y, x),
                      tag=("shoe", bid, b["base"], y, x))
+    # ---- 기둥: 빼지 않는다. 위로는 맡은 줄들의 막대에, 아래로는 바닥(압축) 또는 아래 줄 막대(클립)에 물린다 ----
+    info["piers"] = {}
+    for pid, p in piers.items():
+        pb = body(pier_mass(p) * G_ACC); info["piers"][pid] = dict(dofs=pb)
+        xc, yc = p["xc"], P["y0"] + p["depth"] / 2
+        for rid in p["runs"]:
+            for y in runs[rid]["rows"]:
+                for x in gauss_seg(p["x0"], p["x1"]):
+                    clip(rel(rod_w(rid, y, x), pb, xc, yc, x, y), ("pier_top", pid, rid, y, x))
+        for s in p["supports"]:
+            if s["run"] is None:
+                for y in (P["y0"] + 10.0, P["y0"] + p["depth"] - 10.0):
+                    for x in gauss_seg(s["x0"], s["x1"]):
+                        m.spring(rel(pb, None, xc, yc, x, y), k_c / 2, g0=gap("floor", pid, y, x),
+                                 tag=("floor", pid, None, y, x))
+            else:
+                for y in runs[s["run"]]["rows"]:
+                    if y > P["y0"] + p["depth"] - P["edge"]:
+                        continue
+                    for x in gauss_seg(s["x0"], s["x1"]):
+                        clip(rel(pb, rod_w(s["run"], y, x), xc, yc, x, y), ("pier_base", pid, s["run"], y, x))
     info["rod_w"] = rod_w
     info["face_pts"] = lambda b: face_pts(b, P)
     return m, info

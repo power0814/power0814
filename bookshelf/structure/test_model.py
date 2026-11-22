@@ -143,7 +143,59 @@ def t_ground_springs_negligible():
     assert out[1][2] < 1e-6, out[1][2]
 
 
-TESTS = [t_ground_springs_negligible, t_bridge_matches_hand_calc, t_full_support_takes_load_directly, t_unsupported_detected]
+def t_stepped_shoe_splits_by_symmetry():
+    """계단형 받침: 두 줄 A, B 의 경계에 책 u 가 대칭으로 걸치면 A 와 B 막대가 u 의 무게를 반씩 받는다.
+    양 끝에는 기둥을 두어 그 경로도 함께 지나간다."""
+    setup()
+    side = 2.0
+
+    def bk(i, x0, run):
+        t = 76.0 / 3 - 2 * side          # 세 칸이 기둥 사이 76 mm 에 꼭 맞게 (14–90, 104–180): 97 에 대해 대칭
+        return dict(id=i, t=t, w=120.0, h=200.0, kg=1.0, x0=x0, x1=x0 + t + 2 * side, xc=x0 + (t + 2 * side) / 2,
+                    cg_y=5.0 + 60.0, run=run, base=None, rows_below=None, shoe=20.0,
+                    supports=[dict(run=None, x0=x0, x1=x0 + t + 2 * side, base=0.0, shoe=20.0, rows=None)])
+    A = [bk(f"a{k}", 14.0 + 76.0 / 3 * k, "A") for k in range(3)]
+    Bb = [bk(f"b{k}", 104.0 + 76.0 / 3 * k, "B") for k in range(3)]
+    u = dict(id="u", t=26.0, w=120.0, h=200.0, kg=2.0, x0=89.0 - 15.0 + 15.0, x1=0, xc=0, cg_y=65.0, run="U",
+             base="A", rows_below=[15.0, 95.0], shoe=20.0)
+    u["x0"] = 104.0 - 15.0 - 7.0          # 기둥(90–104)의 가운데 97 에 대해 대칭
+    u["x1"] = u["x0"] + 30.0; u["xc"] = (u["x0"] + u["x1"]) / 2
+    assert abs(u["xc"] - 97.0) < 1e-9
+    u["supports"] = [dict(run="A", x0=u["x0"], x1=97.0, base=230.0, shoe=20.0, rows=[15.0, 95.0]),
+                     dict(run="B", x0=97.0, x1=u["x1"], base=230.0, shoe=20.0, rows=[15.0, 95.0])]
+    piers = [dict(id="P0", x0=0.0, x1=14.0, xc=7.0, runs=["A"], top=230.0, rows=[15.0, 95.0], depth=110.0,
+                  supports=[dict(run=None, x0=0.0, x1=14.0, base=0.0)]),
+             dict(id="P1", x0=90.0, x1=104.0, xc=97.0, runs=["A", "B"], top=230.0, rows=[15.0, 95.0], depth=110.0,
+                  supports=[dict(run=None, x0=90.0, x1=104.0, base=0.0)]),
+             dict(id="P2", x0=180.0, x1=194.0, xc=187.0, runs=["B"], top=230.0, rows=[15.0, 95.0], depth=110.0,
+                  supports=[dict(run=None, x0=180.0, x1=194.0, base=0.0)])]
+    runs = [dict(id="A", rows=[15.0, 95.0], x0=0.0, x1=104.0, cells=[b["id"] for b in A], upper=["u"],
+                 piers=["P0", "P1"], upper_piers=[]),
+            dict(id="B", rows=[15.0, 95.0], x0=90.0, x1=194.0, cells=[b["id"] for b in Bb], upper=["u"],
+                 piers=["P1", "P2"], upper_piers=[]),
+            dict(id="U", rows=[], x0=u["x0"], x1=u["x1"], cells=["u"], upper=[], piers=[], upper_piers=[])]
+    L = dict(params=dict(PARAMS, side=side), books=A + Bb + [u], runs=runs, piers=piers)
+    MD_pm = MD.pier_mass
+    MD.pier_mass = lambda p: 0.0
+    try:
+        # 이 시험은 받침·덮개·기둥 질량을 0 으로 둔다. 무게가 없는 부재는 클립 유격(0.2 mm) 안에서 떠서 해가 하나로
+        # 정해지지 않으므로 접지 스프링(기본값)을 켠다. 좌우 대칭이라 반씩 나뉘는 결과에는 영향이 없다.
+        m, info = MD.build(L, "test", k_c=1e6, k_clip=1e6)
+        r = m.solve(); res = MD.results(m, info, r)
+    finally:
+        MD.pier_mass = MD_pm
+    assert res["equilibrium_error"] < 1e-9, res["equilibrium_error"]
+    on = {"A": 0.0, "B": 0.0}
+    for s, f in zip(m.springs, r["f"]):
+        tag = s["tag"]
+        if tag and tag[0] in ("seat", "latch") and tag[1] == "shoe" and tag[2] == "u":
+            on[tag[3]] += f if tag[0] == "seat" else -f
+    W = 2.0 * MD.G_ACC
+    close(on["A"], W / 2, rel=1e-6, what="stepped shoe share on A")
+    close(on["B"], W / 2, rel=1e-6, what="stepped shoe share on B")
+
+
+TESTS = [t_stepped_shoe_splits_by_symmetry, t_ground_springs_negligible, t_bridge_matches_hand_calc, t_full_support_takes_load_directly, t_unsupported_detected]
 
 if __name__ == "__main__":
     bad = 0

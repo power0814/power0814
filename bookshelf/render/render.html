@@ -725,6 +725,62 @@ if (VIEW === 'rodmod') {
   tagUnder('A · 출력형 칸', A, cam); tagUnder('B · 막대와 마디', B, cam);
 }
 
+// 2안 (책 기둥 + 줄눈 막대) 배치: runs.py 또는 bond.py 의 layout.json. y 는 벽에서 앞으로 (렌더 좌표에서는 −y).
+// ?view=runs&out=out/bond/s3&empty=04,20
+function runsScene(L) {
+  const scene = new THREE.Scene(); scene.background = new THREE.Color(COL.bg);
+  const world = worldGroup(); scene.add(world);
+  const Q = L.params, empty = new Set((P.get('empty') || '').split(',').filter(Boolean));
+  const runs = Object.fromEntries(L.runs.map(r => [r.id, r]));
+  const part = petg();
+  const pierMat = STUDIO ? new THREE.MeshPhysicalMaterial({ color: 0xDCD4C7, roughness: 0.5, clearcoat: 0.15 }) : std(0xDCD4C7, 0.7);
+  const rodMat = std(0x8C8174, 0.45), wedge = std(COL.wedge, 0.6);
+  const box = (x0, x1, y0, y1, z0, z1, mat) => {
+    if (x1 - x0 <= 0 || y1 - y0 <= 0 || z1 - z0 <= 0) return;
+    const m = new THREE.Mesh(new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0), mat);
+    m.position.set((x0 + x1) / 2, -(y0 + y1) / 2, (z0 + z1) / 2);
+    m.castShadow = m.receiveShadow = true; world.add(m);
+  };
+  const seat = s => s.base + (s.run ? Q.rod_r : 0);     // 받침 바닥: 막대 윗면 또는 바닥
+  for (const b of L.books) {
+    const sups = b.supports || [{ x0: b.x0, x1: b.x1, run: b.base, base: b.base ? runs[b.base].level : 0 }];
+    for (const s of sups) box(s.x0 + 0.5, s.x1 - 0.5, Q.y0, Q.y0 + b.w, seat(s), b.z_foot, part);
+    box(b.xc - 4, b.xc + 4, Q.y0 + b.w - 2, Q.y0 + b.w + 9, b.z_foot - 7, b.z_foot - 1, wedge);   // 쐐기 손잡이
+    box(b.x0 + 0.5, b.x1 - 0.5, Q.y0, Q.y0 + b.w, b.z_head, b.z_head + Q.cap_t - Q.rod_r, part);  // 덮개
+    if (!empty.has(b.id)) {
+      const m = bookMesh(b); m.position.set(b.xc, -(Q.y0 + b.w / 2), b.z_foot + b.h / 2); world.add(m);
+    }
+  }
+  for (const r of L.runs) for (const y of r.rows) {
+    const c = new THREE.Mesh(new THREE.CylinderGeometry(Q.rod_r, Q.rod_r, r.x1 - r.x0, 24), rodMat);
+    c.rotation.z = Math.PI / 2; c.position.set((r.x0 + r.x1) / 2, -y, r.level);
+    c.castShadow = c.receiveShadow = true; world.add(c);
+  }
+  for (const p of L.piers || []) {
+    // 기둥 = 막대 줄마다 선 가는 각기둥 (막대가 줄 끝에서 아래로 꺾여 내려가는 모양).
+    // 두 줄이 같이 쓰면 왼쪽 반은 왼쪽 줄 높이, 오른쪽 반은 오른쪽 줄 높이까지 (계단형 윗면)
+    const halves = p.runs.map(id => runs[id]).map(r => (Math.abs(r.x1 - p.x1) < 1e-6
+      ? [p.x0, p.runs.length > 1 ? p.xc : p.x1, r] : [p.runs.length > 1 ? p.xc : p.x0, p.x1, r]));
+    const hw = (p.x1 - p.x0) / 2;
+    for (const s of p.supports) for (const [a, c, r] of halves) for (const y of r.rows) {
+      box(Math.max(a, s.x0), Math.min(c, s.x1), y - hw, y + hw, seat(s), r.level + Q.rod_r, pierMat);
+    }
+  }
+  return { scene, world, box: new THREE.Box3().setFromObject(world) };
+}
+
+if (VIEW === 'runs') {
+  const r = makeRenderer();
+  const { scene, world, box } = runsScene(layout);
+  addRoom(scene);
+  addLights(scene, box, [-0.9, 1.25, 0.95]);
+  const dir = (P.get('dir') || '-0.5,0.28,1').split(',').map(Number);
+  const cam = perspective(box, dir, +(P.get('fov') || 24), +(P.get('margin') || 0.86));
+  tighten(cam, box);
+  studioEnv(r, scene, +(P.get('env') || 0.75));
+  renderFinal(r, scene, cam);
+}
+
 window.__done = true;
 </script>
 </body>
