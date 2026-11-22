@@ -50,10 +50,12 @@ def section(m):
 
 
 def part_masses(b, P):
-    """받침·덮개 질량 추정 (kg)."""
+    """받침·덮개 질량 추정 (kg). 책마다 골조(모서리 기둥 네 개)가 있으면 받침에 더한다 (기둥은 받침에 고정)."""
     foot = (b["t"] + 2 * P["side"]) * b["w"]
     cap = foot * (P["cap_t"] - P["rod_r"] + 4.0) * PETG_PART
     shoe = foot * b["shoe"] * PETG_PART
+    if P.get("post"):
+        shoe += 4 * P["post"][0] * P["post"][1] * (b["shoe"] + b["h"] + P["cap_t"]) * 1.27e-6
     return shoe, cap
 
 

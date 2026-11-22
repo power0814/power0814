@@ -37,6 +37,12 @@ def draw(L, ox, oy, title, Hmax, removed=(), note=None):
             o.append(f'<rect x="{X(s["x0"] + 0.6)}" y="{Z(b["z_foot"])}" width="{max(0.0, s["x1"] - s["x0"] - 1.2) * S}" '
                      f'height="{(b["z_foot"] - s["base"]) * S}" fill="{part}"/>')
         o.append(f'<rect x="{X(b["x0"] + 0.6)}" y="{Z(b["z_head"] + 4)}" width="{(b["x1"] - b["x0"] - 1.2) * S}" height="{4 * S}" fill="{part}"/>')
+        if P.get("post"):   # 책마다 골조: 책등 양옆의 앞 기둥 (받침 바닥에서 덮개 위까지)
+            px = P["post"][0]
+            for xa in (b["x0"] + 0.5, b["x1"] - 0.5 - px):
+                base = min(s["base"] for s in sups if s["x0"] - 1e-6 <= xa + px / 2 <= s["x1"] + 1e-6) \
+                    if any(s["x0"] - 1e-6 <= xa + px / 2 <= s["x1"] + 1e-6 for s in sups) else sups[0]["base"]
+                o.append(f'<rect x="{X(xa)}" y="{Z(b["z_head"] + 4)}" width="{px * S}" height="{(b["z_head"] + 4 - base) * S}" fill="#CFC6B8"/>')
         bx0, bx1 = b["x0"] + P["side"], b["x1"] - P["side"]
         if b["id"] in removed:
             o.append(f'<rect x="{X(bx0)}" y="{Z(b["z_head"])}" width="{(bx1 - bx0) * S}" height="{b["h"] * S}" fill="none" '

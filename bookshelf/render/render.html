@@ -747,6 +747,14 @@ function runsScene(L) {
     for (const s of sups) box(s.x0 + 0.5, s.x1 - 0.5, Q.y0, Q.y0 + b.w, seat(s), b.z_foot, part);
     box(b.xc - 4, b.xc + 4, Q.y0 + b.w - 2, Q.y0 + b.w + 9, b.z_foot - 7, b.z_foot - 1, wedge);   // 쐐기 손잡이
     box(b.x0 + 0.5, b.x1 - 0.5, Q.y0, Q.y0 + b.w, b.z_head, b.z_head + Q.cap_t - Q.rod_r, part);  // 덮개
+    if (Q.post) {   // 책마다 골조: 네 모서리 기둥 (받침에 고정, 덮개 속으로 미끄러진다)
+      const [px, py] = Q.post;
+      for (const xa of [b.x0 + 0.5, b.x1 - 0.5 - px]) {
+        const s = sups.find(s => s.x0 - 1e-6 <= xa + px / 2 && xa + px / 2 <= s.x1 + 1e-6) || sups[0];
+        for (const ya of [Q.y0, Q.y0 + b.w - py])
+          box(xa, xa + px, ya, ya + py, seat(s), b.z_head + Q.cap_t - Q.rod_r, part);
+      }
+    }
     if (!empty.has(b.id)) {
       const m = bookMesh(b); m.position.set(b.xc, -(Q.y0 + b.w / 2), b.z_foot + b.h / 2); world.add(m);
     }

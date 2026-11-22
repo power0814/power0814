@@ -7,7 +7,7 @@ runs.py 와 같은 계(책 + 받침 + 덮개 + 이어진 막대)에 세 가지�
 - 단마다 좌우로 어긋나게 시작한다.
 
 출력: out/stagger/layout.json — runs.py 와 같은 형식에 piers 와 책마다 supports(아래에서 딛는 구간들)가 붙는다.
-사용법: python3 bond.py [--out out/stagger] [--target 520] [--seed 3]   (out/bond 는 예전 출력형 모듈의 엇쌓기 배치다)
+사용법: python3 stagger.py [--out out/stagger] [--target 520] [--seed 3]   (out/bond 는 예전 출력형 모듈의 엇쌓기 배치다)
 """
 import argparse
 import json
@@ -28,6 +28,11 @@ P.update(
     joint_gap=25.0,        # 위 단 기둥은 아래 단 기둥에서 이만큼 떨어진다 (세로 이음이 겹치지 않게: 엇갈려 쌓기)
     pick=3,                # 맞는 책 후보 중 앞쪽 몇 권에서 무작위로 고른다
     rod_ext=0.0,
+    # 책마다 골조: 받침과 덮개를 네 모서리의 가는 기둥으로 잇는다. 기둥은 받침에 고정되고 덮개 구멍으로
+    # slip 만큼 미끄러져 들어가 평소에는 하중을 받지 않는다 (책이 기둥). 칸 옆 두께 = 기둥 + 틈.
+    post=[3.0, 8.0],       # 모서리 기둥 단면 (x 두께, y 깊이) mm
+    slip=1.5,              # 기둥이 덮개 속에서 미끄러지는 거리 mm
+    side=3.5,
 )
 R.P.update({k: P[k] for k in ("y0", "rows", "edge", "cg_margin", "side")})
 
