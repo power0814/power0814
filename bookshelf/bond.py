@@ -6,8 +6,8 @@ runs.py 와 같은 계(책 + 받침 + 덮개 + 이어진 막대)에 세 가지�
 - 엇갈림: 위 단의 책이 아래 단 줄들의 경계를 걸쳐 앉는다. 그런 책의 받침은 바닥이 계단형이다 (책마다 출력).
 - 단마다 좌우로 어긋나게 시작한다.
 
-출력: out/bond/layout.json — runs.py 와 같은 형식에 piers 와 책마다 supports(아래에서 딛는 구간들)가 붙는다.
-사용법: python3 bond.py [--out out/bond] [--target 520] [--seed 3]
+출력: out/stagger/layout.json — runs.py 와 같은 형식에 piers 와 책마다 supports(아래에서 딛는 구간들)가 붙는다.
+사용법: python3 bond.py [--out out/stagger] [--target 520] [--seed 3]   (out/bond 는 예전 출력형 모듈의 엇쌓기 배치다)
 """
 import argparse
 import json
@@ -283,7 +283,7 @@ def export(courses, books):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--books", default=str(ROOT / "books.json"))
-    ap.add_argument("--out", default=str(ROOT / "out/bond"))
+    ap.add_argument("--out", default=str(ROOT / "out/stagger"))
     ap.add_argument("--target", type=float, default=520.0)
     ap.add_argument("--seed", type=int, default=3)
     ap.add_argument("--max-height", type=float, default=P["max_h"])
