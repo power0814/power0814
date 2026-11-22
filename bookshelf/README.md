@@ -64,6 +64,7 @@
 | `assembly.scad` | 전체 책장 미리보기 (OpenSCAD에서 열기) |
 | `runs.py` | 2안 배치 (책 기둥 + 줄눈 막대) → `out/runs/layout.json` |
 | `structure/` | 2안 구조 해석기, 검증 시험, 해석·그림 스크립트, 결과 설명 (`structure/README.md`) |
+| `stagger.py` | 2안을 엇갈려 쌓는 배치 (줄 끝 기둥, 계단형 받침, 책마다 골조) → `out/stagger/` |
 | `render/` | three.js + Playwright 렌더러 |
 | `notes/` | 모듈 설계 노트 페이지 (형태·구조·꺼내기·출력을 축척 도면으로 설명) |
 | `renders/` | 렌더 이미지 |
