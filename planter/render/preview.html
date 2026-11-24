@@ -13,7 +13,7 @@ import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 const P = new URLSearchParams(location.search);
 const W = +(P.get('w') || 1600), H = +(P.get('h') || 1000);
-const parts = (P.get('parts') || 'rings,cross_core_joint,cross_core,cross_arm').split(',');
+const parts = (P.get('parts') || 'rings,cross_core_joint,cross_core,cross_arm,cross_tray,cross_gate,cross_valve_body,cross_valve_plug').split(',');
 const r = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
 r.setPixelRatio(window.devicePixelRatio); r.setSize(W, H);
 r.toneMapping = THREE.ACESFilmicToneMapping; r.outputColorSpace = THREE.SRGBColorSpace;
@@ -21,39 +21,65 @@ r.shadowMap.enabled = true;
 document.getElementById('stage').appendChild(r.domElement);
 const scene = new THREE.Scene(); scene.background = new THREE.Color(0xF3F0EA);
 scene.environment = new THREE.PMREMGenerator(r).fromScene(new RoomEnvironment(), 0.04).texture;
-const petg = new THREE.MeshPhysicalMaterial({ color: 0x61B0FF, roughness: 0.38, transmission: 0.3, thickness: 1.2,
-  ior: 1.57, transparent: true, opacity: 0.9, side: THREE.DoubleSide, envMapIntensity: 0.9 });
+// ?op=0.5 : 팔을 더 비치게 (속 물받이를 보이려 할 때)
+const see = +(P.get('op') || 0.9) < 0.8;
+const petg = see
+  ? new THREE.MeshStandardMaterial({ color: 0x61B0FF, roughness: 0.6, transparent: true, opacity: +P.get('op'),
+      side: THREE.DoubleSide, depthWrite: false, envMapIntensity: 0.5 })
+  : new THREE.MeshPhysicalMaterial({ color: 0x61B0FF, roughness: 0.38, transmission: 0.3, thickness: 1.2,
+      ior: 1.57, transparent: true, opacity: 0.9, side: THREE.DoubleSide, envMapIntensity: 0.9 });
+// 물받이·마개·밸브 (이름에 water, tray, gate, valve) 는 불투명하게 뽑는 부품이라 짙은 회색으로
+const opaque = new THREE.MeshStandardMaterial({ color: 0x3B4248, roughness: 0.55, metalness: 0.0 });
+const matFor = (name) => /water|tray|gate|valve/.test(name) ? opaque : petg;
+const overlay = P.get('overlay') === '1';          // 1 이면 늘어놓지 않고 STL 좌표 그대로 겹친다
 const floor = new THREE.Mesh(new THREE.PlaneGeometry(4000, 4000), new THREE.MeshStandardMaterial({ color: 0xE4DFD6, roughness: 0.95 }));
 floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
 const key = new THREE.DirectionalLight(0xFFF6E8, 2.2); key.position.set(-400, 700, -300); key.castShadow = true;
 key.shadow.mapSize.set(2048, 2048); Object.assign(key.shadow.camera, { left: -600, right: 600, top: 600, bottom: -600, far: 3000 });
 scene.add(key, new THREE.HemisphereLight(0xFFFFFF, 0xD8D2C8, 0.6));
-const loader = new STLLoader();
+const stl = new STLLoader();
+// 꼭짓점이 축 위에 모이는 원뿔(받이 지붕 등)은 넓이 0 삼각형을 만들어 법선이 NaN 이 된다 → 빛 번짐. 그런 삼각형을 뺀다
+const loader = { loadAsync: async (u) => {
+  const g = await stl.loadAsync(u);
+  const pos = g.getAttribute('position'), keep = [];
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i += 3) {
+    a.fromBufferAttribute(pos, i); b.fromBufferAttribute(pos, i + 1); c.fromBufferAttribute(pos, i + 2);
+    if (b.clone().sub(a).cross(c.clone().sub(a)).lengthSq() > 1e-10) keep.push(i);
+  }
+  const arr = new Float32Array(keep.length * 9);
+  keep.forEach((i, k) => { for (let j = 0; j < 9; j++) arr[k * 9 + j] = pos.array[i * 3 + j]; });
+  const out = new THREE.BufferGeometry(); out.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+  return out;
+} };
 // 여러 부품은 왼쪽에서 오른쪽으로 한 줄로 늘어놓는다 (각 STL 은 출력 방향 그대로, z 가 위)
 const box = new THREE.Box3();
 let cursor = 0;
 for (const p of parts) {
   const g = await loader.loadAsync(`/planter/stl/${p}.stl`);
   g.computeVertexNormals();
-  const m = new THREE.Mesh(g, petg); m.castShadow = true; m.receiveShadow = true;
+  const m = new THREE.Mesh(g, matFor(p)); m.castShadow = true; m.receiveShadow = true;
   m.rotation.x = -Math.PI / 2;                       // z 위 → three 의 y 위
   if (p === 'cross_arm') m.rotation.set(-Math.PI / 2, 0, -Math.PI / 2);   // 창이 카메라 쪽을 보게
   m.updateMatrixWorld();
   const b = new THREE.Box3().setFromObject(m);
-  if (parts.length > 1) { m.position.x = cursor - b.min.x; m.position.z = -(b.min.z + b.max.z) / 2; cursor += b.max.x - b.min.x + 60; }
+  if (parts.length > 1 && !overlay) { m.position.x = cursor - b.min.x; m.position.z = -(b.min.z + b.max.z) / 2; cursor += b.max.x - b.min.x + 60; }
   scene.add(m); box.expandByObject(m);
 }
-// ?stack=7&hf=270&r=70&twist=0 : 맨 아래 층(cross_floor) 위에 가운데 층(cross_floor_mid)을 쌓는다.
+// ?stack=7&hf=270&r=70&twist=0&water=1 : 맨 아래 층(cross_floor) 위에 가운데 층(cross_floor_mid, water=1 이면 물받이까지)을 쌓는다.
 // twist 는 층마다 돌리는 각도(도). 0 이면 팔이 위아래로 한 줄로 선다.
 const stack = +(P.get('stack') || 0);
 if (stack > 1) {
   const hf = +(P.get('hf') || 270), rr = +(P.get('r') || 70), tw = +(P.get('twist') || 0) * Math.PI / 180;
-  const g = await loader.loadAsync('/planter/stl/cross_floor_mid.stl'); g.computeVertexNormals();
-  for (let k = 1; k < stack; k++) {
-    const m = new THREE.Mesh(g, petg); m.castShadow = true; m.receiveShadow = true;
-    m.rotation.set(-Math.PI / 2, 0, k * tw);
-    m.position.set(0, rr + k * hf, 0);
-    scene.add(m); box.expandByObject(m);
+  const names = ['cross_floor_mid'].concat(P.get('water') === '1' ? ['cross_floor_mid_water'] : []);
+  for (const n of names) {
+    const g = await loader.loadAsync(`/planter/stl/${n}.stl`); g.computeVertexNormals();
+    for (let k = 1; k < stack; k++) {
+      const m = new THREE.Mesh(g, matFor(n)); m.castShadow = true; m.receiveShadow = true;
+      m.rotation.set(-Math.PI / 2, 0, k * tw);
+      m.position.set(0, rr + k * hf, 0);
+      scene.add(m); box.expandByObject(m);
+    }
   }
 }
 const c = box.getCenter(new THREE.Vector3()), s = box.getSize(new THREE.Vector3());
