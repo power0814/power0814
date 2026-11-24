@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><title>Planter Test Prints</title>
+<style>html,body{margin:0;background:#F3F0EA} #stage{position:relative}</style>
+<script type="importmap">
+{ "imports": { "three": "/bookshelf/render/node_modules/three/build/three.module.js",
+               "three/addons/": "/bookshelf/render/node_modules/three/examples/jsm/" } }
+</script></head><body><div id="stage"></div>
+<script type="module">
+// 시험 출력 미리보기: 반투명 PETG (라이트 블루) 로 STL 을 놓고, 뒤에서 빛을 비춘다.
+// ?parts=rings,socket,spigot,arm&w=1600&h=1000
+import * as THREE from 'three';
+import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+const P = new URLSearchParams(location.search);
+const W = +(P.get('w') || 1600), H = +(P.get('h') || 1000);
+const parts = (P.get('parts') || 'rings,socket,spigot,arm').split(',');
+const r = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+r.setPixelRatio(window.devicePixelRatio); r.setSize(W, H);
+r.toneMapping = THREE.ACESFilmicToneMapping; r.outputColorSpace = THREE.SRGBColorSpace;
+r.shadowMap.enabled = true;
+document.getElementById('stage').appendChild(r.domElement);
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0xF3F0EA);
+scene.environment = new THREE.PMREMGenerator(r).fromScene(new RoomEnvironment(), 0.04).texture;
+const petg = new THREE.MeshPhysicalMaterial({ color: 0x61B0FF, roughness: 0.38, transmission: 0.3, thickness: 1.2,
+  ior: 1.57, transparent: true, opacity: 0.9, side: THREE.DoubleSide, envMapIntensity: 0.9 });
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(4000, 4000), new THREE.MeshStandardMaterial({ color: 0xE4DFD6, roughness: 0.95 }));
+floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
+const key = new THREE.DirectionalLight(0xFFF6E8, 2.2); key.position.set(-400, 700, -300); key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048); Object.assign(key.shadow.camera, { left: -600, right: 600, top: 600, bottom: -600, far: 3000 });
+scene.add(key, new THREE.HemisphereLight(0xFFFFFF, 0xD8D2C8, 0.6));
+const loader = new STLLoader();
+// 출력 판 위 배치와 같게: 각 STL 의 x,y 는 출력 좌표, z 가 위
+const offsets = { rings: [-520, 0], socket: [-120, 0], spigot: [60, 0], arm: [300, 0] };
+const box = new THREE.Box3();
+for (const p of parts) {
+  const g = await loader.loadAsync(`/planter/stl/${p}.stl`);
+  g.computeVertexNormals();
+  const m = new THREE.Mesh(g, petg); m.castShadow = true; m.receiveShadow = true;
+  m.rotation.x = -Math.PI / 2;                       // z 위 → three 의 y 위
+  const o = offsets[p] || [0, 0];
+  m.position.set(o[0], 0, o[1]);
+  if (p === 'rings') m.position.set(o[0] - 75, 0, o[1] + 75);
+  if (p === 'arm') m.rotation.set(-Math.PI / 2, 0, -Math.PI / 2);   // 창(+x)이 카메라 쪽을 보게
+  scene.add(m); box.expandByObject(m);
+}
+const c = box.getCenter(new THREE.Vector3()), s = box.getSize(new THREE.Vector3());
+const cam = new THREE.PerspectiveCamera(26, W / H, 10, 20000);
+const dir = new THREE.Vector3(...(P.get('dir') || '0.15,0.55,1').split(',').map(Number)).normalize();
+cam.position.copy(c).addScaledVector(dir, Math.max(s.x, s.y * 1.6) * 1.9); cam.lookAt(c);
+r.render(scene, cam);
+window.__done = true;
+</script></body></html>
