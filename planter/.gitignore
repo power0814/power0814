@@ -1,3 +1,5 @@
 slice/*.gcode
 slice/*.log
 __pycache__/
+slice/test/*.gcode
+slice/test/*.log

@@ -22,65 +22,71 @@
 
 part = "floor";
 
+// 축척: 1 이면 실물. 물 시험용 축소 모델(water_test.scad)은 k 만 바꿔 같은 파일을 쓴다.
+// 위치와 크기는 k 배가 되지만, 틈·벽 두께·물길 최소 크기는 그대로 둔다.
+// (틈을 줄이면 끼워지지 않고, 물길이 5 mm 아래로 작아지면 표면장력 때문에 물이 흐르지 않고 매달린다)
+k      = 1;
 // 크기
-D      = 140;    // 팔 원통 바깥 지름
-w      = 1.6;    // 팔 벽
-reach  = 320;    // 코어 축에서 팔 바깥 끝까지 (십자 폭 = 2 × reach)
-cap    = 2.0;    // 팔 바깥 끝 막음
-mt     = 1.6;    // 대각선 면 판 두께
-Rc     = 45;     // 코어 바깥 반지름
-wc     = 2.5;    // 코어 벽
-Hf     = 270;    // 층 간격 (팔 축에서 다음 층 팔 축까지). 7 층이면 맨 위 팔 윗면이 바닥에서 R + 6Hf + R = 1760
-gapc   = 0.6;    // 팔과 코어 사이 틈
-mgap   = 0.3;    // 이웃 팔과 대각선 면 사이 틈 (한쪽)
+D      = 140 * k;    // 팔 원통 바깥 지름
+w      = max(0.8, 1.6 * k);   // 팔 벽
+reach  = 320 * k;    // 코어 축에서 팔 바깥 끝까지 (십자 폭 = 2 × reach)
+cap    = max(1.2, 2.0 * k);   // 팔 바깥 끝 막음
+mt     = max(0.8, 1.6 * k);   // 대각선 면 판 두께
+Rc     = 45 * k;     // 코어 바깥 반지름
+wc     = max(1.6, 2.5 * k);   // 코어 벽
+Hf     = 270 * k;    // 층 간격 (팔 축에서 다음 층 팔 축까지). 7 층이면 맨 위 팔 윗면이 바닥에서 R + 6Hf + R = 1760
+gapc   = 0.6;        // 팔과 코어 사이 틈
+mgap   = 0.3;        // 이웃 팔과 대각선 면 사이 틈 (한쪽)
 // 걸이 (프렌치 클리트)
-cl_z   = 56;     // 걸이 턱 꼭대기 높이 (팔 축 = 0 기준). 높을수록 발꿈치와의 팔길이가 길어진다
-cl_out = 7;      // 턱이 코어 밖으로 나온 거리
-hook_w = 50;     // 갈고리와 발꿈치 너비 (코어 쪽 끝에서 잰 현)
+cl_z   = 56 * k;     // 걸이 턱 꼭대기 높이 (팔 축 = 0 기준). 높을수록 발꿈치와의 팔길이가 길어진다
+rim_t  = max(1.2, 1.5 * k);   // 받침 링 바깥 가장자리 턱 (물이 코어 밖으로 흘러내리지 않게)
+cl_out = max(7 * k, 5 + rim_t);   // 턱이 코어 밖으로 나온 거리. 받침 링 홈통 너비(cl_out − rim_t)가 5 mm 아래로 줄지 않게
+cl_h   = 8 * k;      // 걸이 턱 링의 세로 바깥면 높이
+hook_w = 50 * k;     // 갈고리와 발꿈치 너비 (코어 쪽 끝에서 잰 현)
 // 받침 (발꿈치)
-heel_z = [-68, -54];  // 받침 링과 발꿈치가 맞닿는 높이 범위 (낮을수록 좋다. 팔 아래 벽 안쪽이 −68.4)
-heel_l = 8;      // 발꿈치가 팔 끝에서 바깥으로 차지하는 길이
+heel_z = [-68, -54] * k;  // 받침 링과 발꿈치가 맞닿는 높이 범위 (낮을수록 좋다. 팔 아래 벽 안쪽이 −68.4)
+heel_l = 8 * k;      // 발꿈치가 팔 끝에서 바깥으로 차지하는 길이
 // 심는 창 (팔 위쪽)
-win    = [140, 290];  // 창이 놓이는 x 범위 (코어 축 기준)
-win_w  = 64;
-// 코어 쌓기 꽂이
+win    = [140, 290] * k;  // 창이 놓이는 x 범위 (코어 축 기준)
+win_w  = 64 * k;
 // 쌓기
-twist  = 0;      // 층마다 돌리는 각도. 0 이면 팔이 위아래로 한 줄로 선다 (45 면 엇갈림)
-spig   = 18;
+twist  = 0;          // 층마다 돌리는 각도. 0 이면 팔이 위아래로 한 줄로 선다 (45 면 엇갈림)
+spig   = 18 * k;
 clr    = 0.25;
-ch     = 1.5;    // 코어 위 끝 속 모따기. 위 마디 어깨(45°)가 이 면에 앉는다. 남는 이음 줄눈 = wc − ch
+ch     = 1.5 * k;    // 코어 위 끝 속 모따기. 위 마디 어깨(45°)가 이 면에 앉는다. 남는 이음 줄눈 = wc − ch
 // 물길
-roof_z = 30;     // 받이 지붕이 코어 벽 안쪽과 만나는 높이 = 팔로 나가는 구멍 바닥
-roof_t = 2.0;
-out_w  = 13;     // 팔로 나가는 구멍과 홈통 물길 너비
-out_h  = 8;
-chute_x = 66;    // 홈통 끝 (코어 축에서). 물이 여기서 물받이 가운데 물길로 떨어진다
-gut_a  = 20;     // 받침 링 홈통 구멍: 팔 축에서 ± 이 각도
-gut_w  = 12;
-gut_h  = 5;
-rim_t  = 1.5;    // 받침 링 바깥 가장자리 턱 (물이 코어 밖으로 흘러내리지 않게)
-rim_h  = 2;
-// 물받이 (팔 안에 넣는 별도 부품. 불투명하게 뽑거나 겉을 칠한다)
-tr_x   = [56, 316];  // 코어 쪽 끝, 바깥 끝
-tr_head = 74;    // 머리(얕은 바닥, 발꿈치 위) 끝 = 넘침 둑
-tr_zb  = -65.1;  // 몸통 바닥 (바깥 면). 바닥 모서리가 팔 안쪽 면에 얹힌다 (반지름 68.1)
-tr_zh  = -50;    // 머리 바닥 (바깥 면)
-tr_b   = 20;     // 몸통 바닥 반너비 (바깥 면). 옆벽은 45° 로 벌어진다
-tr_rim = -36;
-tw     = 1.6;
-lv_main = -44;   // 물높이 = 넘침 둑 꼭대기
-lv_by  = -40;    // 마개를 닫았을 때 넘쳐 돌아가는 둑 (머리의 칸막이)
-lv_div = -37;    // 몸통의 가운데 물길 칸막이 꼭대기
-ch_hw  = 8;      // 가운데 물길 안 반너비
-div_end = 286;   // 칸막이 끝. 이 너머 바깥 끝에서 물길이 양쪽 칸으로 열린다
-gate_x = 246;    // 마개 자리 (창 아래, 손이 닿는다)
-sp_y   = [10.5, 22];  // 넘친 물 주둥이 (|y|)
-sp_r   = 46.5;   // 주둥이 끝 (코어 축에서). 받침 링 홈통(45~50.5) 위
+out_w  = max(8, 13 * k);     // 팔로 나가는 구멍과 홈통 물길 너비
+out_h  = max(6, 8 * k);
+roof_z = min(30 * k, cl_z - cl_out - cl_h - out_h - 1.3);   // 받이 지붕이 코어 벽 안쪽과 만나는 높이 = 구멍 바닥. 구멍이 걸이 턱 링 아래에 오게
+roof_t = max(1.2, 2.0 * k);
+gut_a  = 20;         // 받침 링 홈통 구멍: 팔 축에서 ± 이 각도
+gut_w  = max(6, 12 * k);
+gut_h  = max(4, 5 * k);
+rim_h  = max(1, 2 * k);
+// 물받이 (팔 안에 넣는 별도 부품)
+tw     = max(1.2, 1.6 * k);
+tr_b   = 20 * k;     // 몸통 바닥 반너비 (바깥 면). 옆벽은 45° 로 벌어진다
+tr_zb  = -round(10 * sqrt(pow(D / 2 - w - 0.3, 2) - pow(tr_b, 2))) / 10;   // 몸통 바닥 (바깥 면): 바닥 모서리가 팔 안쪽 면에서 0.3 안쪽
+tr_zh  = -50 * k;    // 머리 바닥 (바깥 면). 발꿈치 위
+tr_rim = -36 * k;
+lv_main = -44 * k;   // 물높이 = 넘침 둑 꼭대기
+lv_by  = -40 * k;    // 마개를 닫았을 때 넘쳐 돌아가는 둑 (머리의 칸막이)
+lv_div = -37 * k;    // 몸통의 가운데 물길 칸막이 꼭대기
+ch_hw  = max(4, 8 * k);      // 가운데 물길 안 반너비
+tr_x0  = max(56 * k, Rc + cl_out + gapc + 2);   // 물받이 코어 쪽 끝 (팔 끝보다 바깥)
+tr_head = ceil(max(tr_x0 + 10, Rc + cl_out + gapc + heel_l + (heel_z[1] - tr_zb) + 2));   // 머리 끝 = 넘침 둑. 몸통 바닥이 발꿈치를 비켜 가는 곳
+tr_x   = [tr_x0, 316 * k];
+chute_x = round(tr_x0 + 0.55 * (tr_head - tr_x0));   // 홈통 끝 (코어 축에서). 물이 여기서 물받이 머리의 가운데 물길로 떨어진다
+div_end = 286 * k;   // 칸막이 끝. 이 너머 바깥 끝에서 물길이 양쪽 칸으로 열린다
+gate_x = 246 * k;    // 마개 자리 (창 아래, 손이 닿는다)
+sp_y   = [max(ch_hw + tw + 0.5, 10.5 * k), max(ch_hw + tw + 6.5, 22 * k)];   // 넘친 물 주둥이 (|y|)
+sp_r   = Rc + 1.5;   // 주둥이 끝 (코어 축에서). 받침 링 홈통 위
+sp_h   = max(5, 8 * k);      // 주둥이 옆벽 높이 (바닥 위)
 // 배수 (맨 아래 마디)
-sump_z = 66;     // 집수 바닥(원뿔)이 코어 벽 안쪽과 만나는 높이 = 배수 관 바닥
-dk_i   = 4;      // 배수 관 물길 반너비
-dk_w   = 1.8;    // 배수 관 벽
-vx     = 84;     // 밸브 마개 자리 (코어 축에서, 대각선)
+sump_z = 66 * k;     // 집수 바닥(원뿔)이 코어 벽 안쪽과 만나는 높이 = 배수 관 바닥
+dk_i   = 4;          // 배수 관 물길 반너비
+dk_w   = 1.8;        // 배수 관 벽
+vx     = max(84 * k, Rc + 23);   // 밸브 마개 자리 (코어 축에서, 대각선)
 $fn    = 160;
 
 R = D / 2;
@@ -177,6 +183,15 @@ module chute() {                // 팔로 나가는 홈통 (+x 팔). 아랫면 4
     translate([0, hw, 0]) rotate([90, 0, 0]) linear_extrude(2 * hw)
         polygon([[x0, zt - (chute_x - x0)], [chute_x, zt], [chute_x, chute_f(chute_x) + 6], [x0, roof_z + 6]]);
 }
+module chute_drip() {           // 홈통 끝 아랫면의 물끊기 홈: 적게 흐를 때 물이 아랫면을 타고 코어 쪽으로 되돌아가지 않게
+    zt = chute_f(chute_x) - 2;
+    xg = chute_x - 2.2;
+    zu = zt - (chute_x - xg);
+    n = [-1, 1] / sqrt(2);
+    hw = out_w / 2 + 2.6;
+    translate([0, hw, 0]) rotate([90, 0, 0]) linear_extrude(2 * hw)
+        polygon([[xg - 0.7, zu - 0.7] - 0.4 * n, [xg + 0.7, zu + 0.7] - 0.4 * n, [xg, zu] + 1.0 * n]);
+}
 module chute_channel() {
     x0 = Rc - wc - 1;
     translate([0, out_w / 2, 0]) rotate([90, 0, 0]) linear_extrude(out_w)
@@ -204,7 +219,7 @@ module core(z0 = -Hf / 2, base = false) {
                 }
                 // 걸이 턱 링: 단면이 위로 뾰족한 삼각형. 아래면 45°, 위 경사면은 코어 쪽으로 45° 내려간다
                 rotate_extrude() polygon([
-                    [Rc - 0.01, cl_z - cl_out - 8], [Rc + cl_out, cl_z - 8],
+                    [Rc - 0.01, cl_z - cl_out - cl_h], [Rc + cl_out, cl_z - cl_h],
                     [Rc + cl_out, cl_z], [Rc + cl_out - 0.01, cl_z], [Rc + 0.6, cl_z - cl_out + 0.6],
                     [Rc - 0.01, cl_z - cl_out + 0.6]]);
                 // 받침 링: 발꿈치가 미는 곳. 아래면 45°, 바깥면은 세로. 윗면은 홈통 (바깥 가장자리 턱)
@@ -227,6 +242,7 @@ module core(z0 = -Hf / 2, base = false) {
             translate([0, 0, zb - (Rc - Rs) - spig - 1]) cylinder(h = spig + 1.001, r = Rs - wc);
             for (a = [0, 90, 180, 270]) rotate(a) {
                 chute_channel();                                       // 팔로 나가는 구멍과 홈통 물길
+                chute_drip();
                 for (sg = [-1, 1]) rotate(sg * gut_a)                   // 받침 링 홈통에서 코어 속으로 돌아가는 구멍 (위는 45° 뾰족)
                     translate([Ri - 1, 0, heel_z[1]]) rotate([90, 0, 90]) linear_extrude(wc + 2)
                         polygon([[-gut_w / 2, 0], [gut_w / 2, 0], [gut_w / 2, gut_h], [0, gut_h + gut_w / 2], [-gut_w / 2, gut_h]]);
@@ -287,14 +303,19 @@ module tray() {
     // 주둥이 (머리 코어 쪽 벽을 뚫고 받침 링 홈통 위로)
     for (sg = [-1, 1]) difference() {
         intersection() {
-            xbox([30, tr_x[0] + tw], sg > 0 ? [sp_y[0] - tw, sp_y[1] + tw] : [-sp_y[1] - tw, -sp_y[0] + tw], [tr_zh, fl_h + 8]);
+            xbox([0, tr_x[0] + tw], sg > 0 ? [sp_y[0] - tw, sp_y[1] + tw] : [-sp_y[1] - tw, -sp_y[0] + tw], [tr_zh, fl_h + sp_h]);
             difference() { cylinder(h = 400, r = 400, center = true); cylinder(h = 400, r = sp_r, center = true); }
         }
     }
 }
-module tray_cut() {             // 주둥이 물길 (머리 코어 쪽 벽까지 뚫는다) + 마개 홈
+module tray_cut() {             // 주둥이 물길 (머리 코어 쪽 벽까지 뚫는다) + 주둥이 아래 물끊기 홈 + 마개 홈
     for (sg = [-1, 1]) {
-        xbox([20, tr_x[0] + tw + 0.5], sg > 0 ? [sp_y[0], sp_y[1]] : [-sp_y[1], -sp_y[0]], [tr_zh + tw, tr_zh + tw + 9]);
+        intersection() {
+            difference() { cylinder(h = 400, r = sp_r + 2.2, center = true); cylinder(h = 400, r = sp_r + 1.2, center = true); }
+            xbox([0, tr_x[0]], sg > 0 ? [sp_y[0] - tw - 1, sp_y[1] + tw + 1] : [-sp_y[1] - tw - 1, -sp_y[0] + tw + 1],
+                 [tr_zh - 0.5, tr_zh + 0.6]);
+        }
+        xbox([0, tr_x[0] + tw + 0.5], sg > 0 ? [sp_y[0], sp_y[1]] : [-sp_y[1], -sp_y[0]], [tr_zh + tw, tr_zh + tw + sp_h + 1]);
         xbox([gate_x - 1.2, gate_x + 1.2], sg > 0 ? [ch_hw - 0.01, ch_hw + 2] : [-ch_hw - 2, -ch_hw + 0.01],
              [tr_zb + tw - 0.01, lv_div + 1]);
     }
@@ -309,10 +330,10 @@ module gate() {
     translate([gate_x - t / 2, 0, 0]) rotate([90, 0, 90]) linear_extrude(t) difference() {
         union() {
             translate([-hy, z0]) square([2 * hy, lv_div - z0]);
-            translate([-3, z0]) square([6, 40 - z0]);
-            translate([-8, 28]) square([16, 14]);
+            translate([-max(2, 3 * k), z0]) square([2 * max(2, 3 * k), 40 * k - z0]);
+            translate([-8 * k, 28 * k]) square([16 * k, 14 * k]);
         }
-        translate([0, 35]) circle(r = 4, $fn = 32);
+        translate([0, 35 * k]) circle(r = 4 * k, $fn = 32);
     }
 }
 
