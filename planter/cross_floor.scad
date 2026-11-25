@@ -259,7 +259,12 @@ module core(z0 = -Hf / 2, base = false) {
     }
     difference() {                        // 받이 지붕 (가운데 마디) / 집수 바닥 (맨 아래 마디)
         roof_cone(base ? sump_z : roof_z);
-        if (base) rotate(45) translate([0, 0, sump_z]) duct_prism(dk_w + 0.2, Rc - wc - 1, Rc + 7);
+        // 집수 바닥은 관 물길(바닥 = sump_z)만큼만 판다. 밸브 관이 끼는 넓은 구멍(바닥 sump_z − 2)은
+        // 코어 벽 안쪽(Ri 바깥)에서만 판다: 벽 안쪽 공간에서 넓게 파면 원뿔을 뚫어 물이 코어 아래로 샌다
+        if (base) rotate(45) translate([0, 0, sump_z]) {
+            duct_prism(0, Rc - wc - 1, Rc + 7);
+            duct_prism(dk_w + 0.2, Rc - wc, Rc + 7);
+        }
     }
 }
 
