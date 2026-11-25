@@ -17,7 +17,7 @@
 // part = "floor"       맨 아래 층 (팔이 바닥에 놓임)              "floor_water"     그 물받이·밸브
 //        "floor_mid"   가운데 층 하나, 팔 축 z = 0                 "floor_mid_water" 그 물받이·마개
 //        "tower"       맨 아래 층 + 둘째 층, 물 부품까지 (틈 검사용)
-//        "arm" "core" "core_base" "core_joint" "tray" "gate" "valve_body" "valve_plug"   출력 방향
+//        "arm" "core" "core_base" "core_joint" "tray" "gate" "basket" "valve_body" "valve_plug"   출력 방향
 // openscad -o stl/cross_arm.stl -D 'part="arm"' cross_floor.scad
 
 part = "floor";
@@ -68,18 +68,26 @@ tw     = max(1.2, 1.6 * k);
 tr_b   = 20 * k;     // 몸통 바닥 반너비 (바깥 면). 옆벽은 45° 로 벌어진다
 tr_zb  = -round(10 * sqrt(pow(D / 2 - w - 0.3, 2) - pow(tr_b, 2))) / 10;   // 몸통 바닥 (바깥 면): 바닥 모서리가 팔 안쪽 면에서 0.3 안쪽
 tr_zh  = -50 * k;    // 머리 바닥 (바깥 면). 발꿈치 위
-tr_rim = -36 * k;
-lv_main = -44 * k;   // 물높이 = 넘침 둑 꼭대기
-lv_by  = -40 * k;    // 마개를 닫았을 때 넘쳐 돌아가는 둑 (머리의 칸막이)
-lv_div = -37 * k;    // 몸통의 가운데 물길 칸막이 꼭대기
-ch_hw  = max(4, 8 * k);      // 가운데 물길 안 반너비
+lv_main = -32 * k;   // 물높이 = 넘침 둑 꼭대기 (창에서 물까지 약 10 cm, 깊이 약 3 cm)
+lv_by  = lv_main + max(2, 3 * k);    // 마개를 닫았을 때 넘쳐 돌아가는 둑 (머리의 칸막이)
+lv_div = lv_by + max(1.5, 2 * k);    // 옆 물길과 뿌리 칸 사이 칸막이 꼭대기
+tr_rim = lv_div + max(1, 2 * k);     // 물받이 테두리
+tr_hw  = 48 * k;     // 물받이 위쪽 반너비 (세로벽). 팔 코어 쪽 열린 끝(반너비 약 50)을 지나가야 한다
+ch_hw  = max(4, 8 * k);      // 머리: 들어오는 물 칸(−y ~ +ch_hw)과 골(+y) 사이 칸막이 자리
+ch_f   = max(5, 8 * k);      // 옆 물길 바닥 너비
 tr_x0  = max(56 * k, Rc + cl_out + gapc + 2);   // 물받이 코어 쪽 끝 (팔 끝보다 바깥)
 tr_head = ceil(max(tr_x0 + 10, Rc + cl_out + gapc + heel_l + (heel_z[1] - tr_zb) + 2));   // 머리 끝 = 넘침 둑. 몸통 바닥이 발꿈치를 비켜 가는 곳
 tr_x   = [tr_x0, 316 * k];
 chute_x = round(tr_x0 + 0.55 * (tr_head - tr_x0));   // 홈통 끝 (코어 축에서). 물이 여기서 물받이 머리의 가운데 물길로 떨어진다
-div_end = 286 * k;   // 칸막이 끝. 이 너머 바깥 끝에서 물길이 양쪽 칸으로 열린다
+div_end = 286 * k;   // 칸막이 끝. 이 너머 바깥 끝에서 옆 물길이 뿌리 칸으로 열린다
 gate_x = 246 * k;    // 마개 자리 (창 아래, 손이 닿는다)
-sp_y   = [max(ch_hw + tw + 0.5, 10.5 * k), max(ch_hw + tw + 6.5, 22 * k)];   // 넘친 물 주둥이 (|y|)
+sp_y   = [max(ch_hw + tw + 0.5, 10.5 * k), max(ch_hw + tw + 8, 30 * k)];   // 넘친 물 주둥이 (+y 쪽 하나)
+ch_y   = -(tr_b + tw - tw * sqrt(2));   // 옆 물길 바깥 끝 (물받이 안 바닥의 −y 모서리)
+dv_y   = ch_y + ch_f;    // 옆 물길과 뿌리 칸 사이 칸막이의 물길 쪽 면
+// 심는 바구니 (창으로 넣어 물까지 내린다)
+bk_x   = [178, 236] * k;
+bk_y   = [max(-8 * k, dv_y + tw + 1.5), min(28 * k, 32 * k - 2)];
+bk_w   = max(1.2, 1.6 * k);
 sp_r   = Rc + 1.5;   // 주둥이 끝 (코어 축에서). 받침 링 홈통 위
 sp_h   = max(5, 8 * k);      // 주둥이 옆벽 높이 (바닥 위)
 // 배수 (맨 아래 마디)
@@ -107,7 +115,7 @@ module window_cut() {        // 위쪽 벽의 심는 창. 코어 쪽 끝은 45°
     a = win[0];
     b = win[1];
     hw = win_w / 2;
-    translate([0, 0, R - 2 * w]) linear_extrude(height = 3 * w)
+    translate([0, 0, R / 4]) linear_extrude(height = R)   // 위쪽 벽을 세로로 뚫는다 (둥근 벽이라 얇게 자르면 창이 좁아진다)
         polygon([[a + hw, -hw], [b, -hw], [b, hw], [a + hw, hw], [a, 0]]);
 }
 module arm() {
@@ -256,84 +264,106 @@ module core(z0 = -Hf / 2, base = false) {
 }
 
 // ---------- 물받이 (쓰는 좌표 = 팔 좌표, +x 팔 안) ----------
-// 몸통 단면은 바닥 반너비 tr_b, 옆벽 45° 인 사다리꼴. 머리(코어 쪽)는 발꿈치 위로 바닥이 얕다.
-// 칸: 가운데 물길(|y| < ch_hw) 과 양쪽 칸. 홈통 물이 머리의 물길로 떨어져 바깥 끝까지 가서 양쪽 칸으로 나뉘고,
-//     양쪽 칸을 거슬러 와 머리 앞 넘침 둑(lv_main)을 넘어 머리 양옆 골로, 다시 주둥이로 나간다.
-// 마개(gate)를 물길에 끼우면 물길이 머리 칸막이(lv_by)를 넘쳐 바로 골로 가므로, 이 팔은 윗물을 받지 않는다.
-// 출력: 한쪽 옆벽을 판에 대고 45° 로 눕힌다 (part = "tray"). 모든 면이 45° 안쪽이라 서포트가 없다.
-function trap(zb, top = tr_rim + 10) = [[-tr_b - (zb - tr_zb), zb], [tr_b + (zb - tr_zb), zb],
-                                        [tr_b + (top - tr_zb), top], [-tr_b - (top - tr_zb), top]];
+// 단면: 바닥 반너비 tr_b 에서 45° 로 벌어지다가 반너비 tr_hw 부터 세로벽. 머리(코어 쪽)는 발꿈치 위로 바닥이 얕다.
+// 칸: −y 벽을 따라 옆 물길, 나머지는 창 아래 넓은 뿌리 칸 하나.
+//   홈통 물이 머리 가운데(들어오는 칸)로 떨어져 옆 물길로 바깥 끝까지 가고, 뿌리 칸을 거슬러 와
+//   머리 앞 넘침 둑(lv_main)을 넘어 +y 쪽 골로, 다시 주둥이로 나간다.
+// 마개(gate)를 옆 물길에 끼우면 들어오는 칸이 머리 칸막이(lv_by)를 넘쳐 바로 골로 가므로, 이 팔은 윗물을 받지 않는다.
+// 출력: −y 아래 45° 벽을 판에 대고 눕힌다 (part = "tray"). 모든 면이 45° 안쪽이라 서포트가 없다.
+function prof(zb, top = tr_rim + 10) =
+    let(zv = tr_zb + (tr_hw - tr_b), hb = tr_b + (zb - tr_zb))
+    zb >= zv ? [[-tr_hw, zb], [tr_hw, zb], [tr_hw, top], [-tr_hw, top]]
+             : [[-hb, zb], [hb, zb], [tr_hw, zv], [tr_hw, top], [-tr_hw, top], [-tr_hw, zv]];
 module xprism(poly, x0, x1) { translate([x0, 0, 0]) rotate([90, 0, 90]) linear_extrude(x1 - x0) polygon(poly); }
 module xprism_off(poly, d, x0, x1) { translate([x0, 0, 0]) rotate([90, 0, 90]) linear_extrude(x1 - x0) offset(delta = d) polygon(poly); }
 module xbox(x, y, z) { translate([x[0], y[0], z[0]]) cube([x[1] - x[0], y[1] - y[0], z[1] - z[0]]); }
 module tray() {
     fl_h = tr_zh + tw;                   // 머리 안 바닥
-    fl_m = tr_zb + tw;                   // 몸통 안 바닥
-    yo = tr_b + (tr_rim - tr_zb) + 2;    // 바깥 반너비보다 넉넉히
+    yo = tr_hw + 2;
     intersection() {
         union() {
             difference() {
                 union() {
-                    xprism(trap(tr_zh), tr_x[0], tr_head + 0.01);
-                    xprism(trap(tr_zb), tr_head, tr_x[1]);
+                    xprism(prof(tr_zh), tr_x[0], tr_head + 0.01);
+                    xprism(prof(tr_zb), tr_head, tr_x[1]);
                 }
-                // 속: 머리, 몸통 (벽 tw)
-                xprism_off(trap(tr_zh), -tw, tr_x[0] + tw, tr_head + tw + 0.01);
-                xprism_off(trap(tr_zb), -tw, tr_head + tw, tr_x[1] - tw);
+                xprism_off(prof(tr_zh), -tw, tr_x[0] + tw, tr_head + tw + 0.01);   // 속: 머리, 몸통 (벽 tw)
+                xprism_off(prof(tr_zb), -tw, tr_head + tw, tr_x[1] - tw);
             }
-            // 칸막이 (가운데 물길 양옆): 머리는 lv_by, 몸통은 lv_div 까지
-            for (sg = [-1, 1]) {
-                xbox([tr_x[0], tr_head + tw], sg > 0 ? [ch_hw, ch_hw + tw] : [-ch_hw - tw, -ch_hw], [tr_zb, lv_by]);
-                xbox([tr_head, div_end], sg > 0 ? [ch_hw, ch_hw + tw] : [-ch_hw - tw, -ch_hw], [tr_zb, lv_div]);
-                // 마개 기둥 (칸막이를 두껍게, 끝은 45°)
-                hull() {
-                    xbox([gate_x - 4, gate_x + 4], sg > 0 ? [ch_hw, ch_hw + 4] : [-ch_hw - 4, -ch_hw], [tr_zb, lv_div]);
-                    xbox([gate_x - 6.4, gate_x + 6.4], sg > 0 ? [ch_hw, ch_hw + tw] : [-ch_hw - tw, -ch_hw], [tr_zb, lv_div]);
-                }
-                // 넘침 둑: 머리와 몸통 경계, 양쪽 칸 앞
-                xbox([tr_head, tr_head + tw], sg > 0 ? [ch_hw, yo] : [-yo, -ch_hw], [tr_zb, lv_main]);
-            }
+            // 머리: 들어오는 칸(y < ch_hw)과 골 사이 칸막이 = 우회 둑
+            xbox([tr_x[0], tr_head + tw], [ch_hw, ch_hw + tw], [tr_zb, lv_by]);
+            // 몸통: 옆 물길과 뿌리 칸 사이 칸막이
+            xbox([tr_head, div_end], [dv_y, dv_y + tw], [tr_zb, lv_div]);
+            // 머리와 몸통 경계: 골 앞은 넘침 둑(lv_main), 들어오는 칸 앞(뿌리 칸 쪽)은 칸막이 높이
+            xbox([tr_head, tr_head + tw], [ch_hw, yo], [tr_zb, lv_main]);
+            xbox([tr_head, tr_head + tw], [dv_y, ch_hw + tw], [tr_zb, lv_div]);
+            // 마개 기둥: 마개 자리에서 옆 물길을 네모나게 (칸막이 쪽, 바깥 벽 쪽)
+            xbox([gate_x - 4, gate_x + 4], [dv_y, dv_y + 4], [tr_zb, lv_div]);
+            xbox([gate_x - 4, gate_x + 4], [-yo, ch_y], [tr_zb, lv_div]);
         }
-        // 바깥 모양 안으로 자르고, 위는 테두리까지
-        union() {
-            xprism(trap(tr_zh, tr_rim), tr_x[0], tr_head + 0.01);
-            xprism(trap(tr_zb, tr_rim), tr_head, tr_x[1]);
+        union() {                         // 바깥 모양 안으로 자르고, 위는 테두리까지
+            xprism(prof(tr_zh, tr_rim), tr_x[0], tr_head + 0.01);
+            xprism(prof(tr_zb, tr_rim), tr_head, tr_x[1]);
         }
     }
-    // 주둥이 (머리 코어 쪽 벽을 뚫고 받침 링 홈통 위로)
-    for (sg = [-1, 1]) difference() {
-        intersection() {
-            xbox([0, tr_x[0] + tw], sg > 0 ? [sp_y[0] - tw, sp_y[1] + tw] : [-sp_y[1] - tw, -sp_y[0] + tw], [tr_zh, fl_h + sp_h]);
-            difference() { cylinder(h = 400, r = 400, center = true); cylinder(h = 400, r = sp_r, center = true); }
-        }
+    // 주둥이 (+y 쪽, 머리 코어 쪽 벽을 뚫고 받침 링 홈통 위로)
+    intersection() {
+        xbox([0, tr_x[0] + tw], [sp_y[0] - tw, sp_y[1] + tw], [tr_zh, fl_h + sp_h]);
+        difference() { cylinder(h = 400, r = 400, center = true); cylinder(h = 400, r = sp_r, center = true); }
     }
 }
-module tray_cut() {             // 주둥이 물길 (머리 코어 쪽 벽까지 뚫는다) + 주둥이 아래 물끊기 홈 + 마개 홈
-    for (sg = [-1, 1]) {
-        intersection() {
-            difference() { cylinder(h = 400, r = sp_r + 2.2, center = true); cylinder(h = 400, r = sp_r + 1.2, center = true); }
-            xbox([0, tr_x[0]], sg > 0 ? [sp_y[0] - tw - 1, sp_y[1] + tw + 1] : [-sp_y[1] - tw - 1, -sp_y[0] + tw + 1],
-                 [tr_zh - 0.5, tr_zh + 0.6]);
-        }
-        xbox([0, tr_x[0] + tw + 0.5], sg > 0 ? [sp_y[0], sp_y[1]] : [-sp_y[1], -sp_y[0]], [tr_zh + tw, tr_zh + tw + sp_h + 1]);
-        xbox([gate_x - 1.2, gate_x + 1.2], sg > 0 ? [ch_hw - 0.01, ch_hw + 2] : [-ch_hw - 2, -ch_hw + 0.01],
-             [tr_zb + tw - 0.01, lv_div + 1]);
+module tray_cut() {             // 주둥이 물길 + 주둥이 아래 물끊기 홈 + 마개 홈
+    intersection() {
+        difference() { cylinder(h = 400, r = sp_r + 2.2, center = true); cylinder(h = 400, r = sp_r + 1.2, center = true); }
+        xbox([0, tr_x[0]], [sp_y[0] - tw - 1, sp_y[1] + tw + 1], [tr_zh - 0.5, tr_zh + 0.6]);
     }
+    xbox([0, tr_x[0] + tw + 0.5], [sp_y[0], sp_y[1]], [tr_zh + tw, tr_zh + tw + sp_h + 1]);
+    xbox([gate_x - 1.2, gate_x + 1.2], [ch_y - 2, ch_y + 0.01], [tr_zb + tw - 0.01, lv_div + 1]);
+    xbox([gate_x - 1.2, gate_x + 1.2], [dv_y - 0.01, dv_y + 2], [tr_zb + tw - 0.01, lv_div + 1]);
 }
 module tray_full() { difference() { tray(); tray_cut(); } }
 
-// 마개: 가운데 물길을 막는 판 + 창 쪽으로 올라오는 손잡이. 판에 눕혀 뽑는다
+// 마개: 옆 물길을 막는 판 + 창 쪽으로 올라오는 손잡이. 판에 눕혀 뽑는다
 module gate() {
     t = 2.0; c = 0.3;
-    hy = ch_hw + 2 - c;
+    yc = (ch_y + dv_y) / 2;
+    hy = (dv_y - ch_y) / 2 + 2 - c;
     z0 = tr_zb + tw + c;
-    translate([gate_x - t / 2, 0, 0]) rotate([90, 0, 90]) linear_extrude(t) difference() {
+    translate([gate_x - t / 2, yc, 0]) rotate([90, 0, 90]) linear_extrude(t) difference() {
         union() {
             translate([-hy, z0]) square([2 * hy, lv_div - z0]);
             translate([-max(2, 3 * k), z0]) square([2 * max(2, 3 * k), 40 * k - z0]);
             translate([-8 * k, 28 * k]) square([16 * k, 14 * k]);
         }
         translate([0, 35 * k]) circle(r = 4 * k, $fn = 32);
+    }
+}
+
+// 심는 바구니: 창 긴 변 두 곳에 걸치는 걸쇠 + 뿌리 칸 물속까지 내려가는 몸통.
+// 배지(하이드로볼 등)를 채운다. 아래쪽 벽의 틈으로 물과 뿌리가 드나든다. 뒤집어 뽑는다 (걸쇠가 판에).
+module basket() {
+    ze = sqrt(R * R - pow(win_w / 2, 2));     // 창 긴 변에서 팔 바깥면 높이
+    zt = ze + max(2, 3 * k);                  // 걸쇠 윗면
+    zb = lv_main - max(4, 6 * k);             // 바닥 꼭짓점: 물속
+    hy = (bk_y[1] - bk_y[0]) / 2;
+    yc = (bk_y[0] + bk_y[1]) / 2;
+    lug = max(4, 6 * k);
+    sl = max(1.6, 2 * k);                     // 틈 너비
+    difference() {
+        union() {
+            // 몸통: 바닥은 45° V (뒤집어 뽑을 때 지붕이 된다)
+            hull() {
+                xbox(bk_x, bk_y, [zb + hy, zt]);
+                xbox(bk_x, [yc - 0.5, yc + 0.5], [zb, zb + 1]);
+            }
+            for (x = [bk_x[0], bk_x[1] - lug]) xbox([x, x + lug], [-win_w / 2 - 5 * k - 1, win_w / 2 + 5 * k + 1], [ze, zt]);
+        }
+        hull() {                              // 속
+            xbox([bk_x[0] + bk_w, bk_x[1] - bk_w], [bk_y[0] + bk_w, bk_y[1] - bk_w], [zb + hy, zt + 1]);
+            xbox([bk_x[0] + bk_w, bk_x[1] - bk_w], [yc - 0.1, yc + 0.1], [zb + bk_w * sqrt(2), zb + bk_w * sqrt(2) + 0.2]);
+        }
+        for (x = [bk_x[0] + 5 * k + sl : 4 * sl : bk_x[1] - 5 * k - sl])   // 물·뿌리 틈: V 바닥을 가로질러 물높이 위까지
+            xbox([x - sl / 2, x + sl / 2], [bk_y[0] - 1, bk_y[1] + 1], [zb - 1, lv_main + 0.3 * (ze - lv_main)]);
     }
 }
 
@@ -381,7 +411,7 @@ module floor_set(base = false) {
     for (a = [0, 90, 180, 270]) rotate(a) arm();
 }
 module water_set(base = false) {
-    for (a = [0, 90, 180, 270]) rotate(a) { tray_full(); if (!base) gate(); }
+    for (a = [0, 90, 180, 270]) rotate(a) { tray_full(); basket(); if (!base) gate(); }
     if (base) rotate(45) translate([0, 0, sump_z]) { valve_body(); translate([vx, 0, 0]) valve_plug(); }
 }
 
@@ -405,6 +435,7 @@ else if (part == "core_joint") {  // 쌓기 이음 시험: 코어 아래 끝 어
 }
 else if (part == "tray") translate([0, 0, (tr_b - tr_zb) / sqrt(2)]) rotate([45, 0, 0]) tray_full();
 else if (part == "gate") translate([0, 0, 1]) rotate([0, -90, 0]) translate([-gate_x, 0, 0]) gate();
+else if (part == "basket") translate([-bk_x[0], 0, sqrt(R * R - pow(win_w / 2, 2)) + max(2, 3 * k)]) rotate([180, 0, 0]) basket();
 else if (part == "valve_body") translate([0, 0, dk_w]) valve_body();
 else if (part == "valve_plug") translate([0, 0, 16 + 6]) rotate([180, 0, 0]) valve_plug();
 
