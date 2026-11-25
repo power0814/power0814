@@ -17,7 +17,7 @@
 // part = "floor"       맨 아래 층 (팔이 바닥에 놓임)              "floor_water"     그 물받이·밸브
 //        "floor_mid"   가운데 층 하나, 팔 축 z = 0                 "floor_mid_water" 그 물받이·마개
 //        "tower"       맨 아래 층 + 둘째 층, 물 부품까지 (틈 검사용)
-//        "arm" "core" "core_base" "core_joint" "tray" "gate" "basket" "valve_body" "valve_plug"   출력 방향
+//        "arm" "core" "core_base" "core_joint" "tray" "gate" "basket" "tank" "valve_body" "valve_plug"   출력 방향
 // openscad -o stl/cross_arm.stl -D 'part="arm"' cross_floor.scad
 
 part = "floor";
@@ -51,8 +51,8 @@ win    = [140, 290] * k;  // 창이 놓이는 x 범위 (코어 축 기준)
 win_w  = 64 * k;
 // 쌓기
 twist  = 0;          // 층마다 돌리는 각도. 0 이면 팔이 위아래로 한 줄로 선다 (45 면 엇갈림)
-spig   = 18 * k;
-clr    = 0.25;
+spig   = 40 * k;    // 꽂이 길이. 지름의 약 절반: 한쪽 무게를 받아도 위 마디가 테두리를 축으로 들리지 않게 (18 → 40)
+clr    = 0.15;      // 꽂이 틈 (한쪽). 0.25 는 반 크기 출력에서 헐렁했다
 ch     = 1.5 * k;    // 코어 위 끝 속 모따기. 위 마디 어깨(45°)가 이 면에 앉는다. 남는 이음 줄눈 = wc − ch
 // 물길
 out_w  = max(8, 13 * k);     // 팔로 나가는 구멍과 홈통 물길 너비
@@ -236,9 +236,18 @@ module core(z0 = -Hf / 2, base = false) {
                     [Rc + cl_out, heel_z[1] + rim_h], [Rc + cl_out - rim_t, heel_z[1] + rim_h],
                     [Rc + cl_out - rim_t, heel_z[1]], [Rc - 0.01, heel_z[1]]]);
                 if (!base) for (a = [0, 90, 180, 270]) rotate(a) chute();
-                else rotate(45) translate([0, 0, sump_z]) hull() {   // 배수 관 꽂는 자리 (아랫면 45°)
-                    duct_prism(dk_w + 0.2 + 2.5, Rc - 1, Rc + 6);
-                    translate([0, 0, -7]) duct_prism(dk_w + 0.2 + 2.5, Rc - 1, Rc - 0.5);
+                else intersection() {   // 배수 관 꽂는 자리 (아랫면 45°). 모서리는 맨 아래 층 팔 끝 원 안으로 (반 크기에서 닿았다)
+                    rotate(45) translate([0, 0, sump_z]) hull() {
+                        duct_prism(dk_w + 0.2 + 2.5, Rc - 1, Rc + 6);
+                        translate([0, 0, -7]) duct_prism(dk_w + 0.2 + 2.5, Rc - 1, Rc - 0.5);
+                    }
+                    cylinder(h = 4 * R, r = Rc + cl_out + gapc - 0.3, center = true);
+                    // 맨 아래 층 팔 갈고리가 지나가는 부채꼴을 비운다 (반 크기에서 자리 옆면과 겹쳤다)
+                    let(al = asin((hook_w / 2) / (Rc + cl_out + gapc)) + 1.5) difference() {
+                        cylinder(h = 4 * R, r = 3 * Rc, center = true);
+                        for (a = [0, 90]) rotate(a - al) rotate_extrude(angle = 2 * al)
+                            polygon([[Rc + 0.01, cl_z - cl_out], [3 * Rc, cl_z - cl_out], [3 * Rc, 2 * R], [Rc + 0.01, 2 * R]]);
+                    }
                 }
             }
             translate([0, 0, base ? z0 : -Hf]) cylinder(h = 2 * Hf, r = 3 * Rc);   // 맨 아래 마디는 바닥 아래를 자른다
@@ -372,6 +381,49 @@ module basket() {
     }
 }
 
+// ---------- 물 추 통 (구조 시험용) ----------
+// 물받이 자리에 넣는 막힌 통. 물이 흐르지 않고 담긴 채로 팔에 무게를 준다 (붓는 mL = 무게 g).
+// 바닥은 물받이와 같아(바닥 모서리가 팔 안쪽 면에 얹힌다) 무게가 같은 자리에 실린다. 칸막이·둑·주둥이가 없다.
+// 폭은 팔의 코어 쪽 입구(대각선 판 사이)보다 좁게, 높이는 갈고리 아래로 잡아 그대로 밀어 넣는다:
+//   팔을 걸기 전에 통을 tk_lift 만큼 띄워(발꿈치를 넘게) 코어 쪽 열린 끝으로 밀어 넣고 내려놓는다.
+// 채우기·빼기: 심는 창으로 계량컵이나 주사기. 양 끝 안쪽 벽에 25 mL 마다 눈금 턱 (50 mL 마다 길게).
+// 출력: 바닥이 판, 위가 열린 채로 세운다 (45° 와 세로벽뿐이라 서포트가 없다).
+tk_w   = max(1.6, tw);           // 통 벽 (물이 새지 않게 물받이보다 두껍게)
+tk_c   = (mgap + mt) * sqrt(2);  // 대각선 판 안쪽 면: |y| = x − tk_c
+tk_rc  = Rc + cl_out + gapc;     // 팔 끝을 자른 원 (코어 둘레)
+tk_hw  = min(tr_hw, (tk_c + sqrt(2 * tk_rc * tk_rc - tk_c * tk_c)) / 2 - tk_c - 0.4);   // 통 반너비: 입구에서 0.4 남게
+tk_lift = heel_z[1] - tr_zb + 0.6;                    // 넣을 때 띄우는 높이 (발꿈치 위)
+tk_top = cl_z - cl_out + 2.0 - tk_lift - 0.5;         // 통 위 끝: 띄워도 갈고리 아랫면(cl_z − cl_out + 2)에 안 닿게
+tk_x   = [tr_head, tr_x[1]];     // 몸통만 (머리 자리는 발꿈치 위라 뺀다)
+tk_L   = tk_x[1] - tk_x[0] - 2 * tk_w;          // 속 길이
+tk_z0  = tr_zb + tk_w;                           // 속 바닥
+tk_hb  = tr_b + tk_w - tk_w * sqrt(2);           // 속 바닥 반너비
+tk_zv  = tr_zb + (tk_hw - tr_b) - tk_w + tk_w * sqrt(2);   // 45° 벽이 세로벽으로 바뀌는 높이
+function tk_prof(top) = let(zv = tr_zb + (tk_hw - tr_b))
+    [[-tr_b, tr_zb], [tr_b, tr_zb], [tk_hw, zv], [tk_hw, top], [-tk_hw, top], [-tk_hw, zv]];
+function tk_av() = (2 * tk_hb + (tk_zv - tk_z0)) * (tk_zv - tk_z0);
+function tk_vol(z) = tk_L * (z <= tk_zv ? (2 * tk_hb + (z - tk_z0)) * (z - tk_z0)
+                                         : tk_av() + 2 * (tk_hw - tk_w) * (z - tk_zv));   // mm³
+function tk_z(ml) = let(a = ml * 1000 / tk_L)
+    a <= tk_av() ? tk_z0 - tk_hb + sqrt(tk_hb * tk_hb + a) : tk_zv + (a - tk_av()) / (2 * (tk_hw - tk_w));
+module tank() {
+    difference() {
+        translate([tk_x[0], 0, 0]) rotate([90, 0, 90]) linear_extrude(tk_x[1] - tk_x[0]) polygon(tk_prof(tk_top));
+        translate([tk_x[0] + tk_w, 0, 0]) rotate([90, 0, 90]) linear_extrude(tk_L)
+            offset(delta = -tk_w) polygon(tk_prof(tk_top + 5));
+    }
+    // 눈금 턱: 윗면이 눈금, 아랫면 45°
+    for (ml = [25 : 25 : floor(tk_vol(tk_top - 1.5) / 25000) * 25], e = [0, 1]) {
+        xw = e == 0 ? tk_x[0] + tk_w : tk_x[1] - tk_w;
+        s = e == 0 ? 1 : -1;
+        hl = ml % 50 == 0 ? 6 : 3;
+        z = tk_z(ml);
+        translate([0, hl, 0]) rotate([90, 0, 0]) linear_extrude(2 * hl)
+            polygon([[xw - s * 0.01, z - 0.8], [xw - s * 0.01, z], [xw + s * 0.8, z]]);
+    }
+}
+echo(str("TANK k=", k, " hw=", tk_hw, " top=", tk_top, " lift=", tk_lift, " cap_mL=", round(tk_vol(tk_top - 1.5) / 1000), " L=", tk_L));
+
 // ---------- 배수 밸브 (맨 아래 마디, 대각선) ----------
 // 몸통: 코어 구멍에 꽂히는 배수 관 + 마개 통 + 호스 꼭지. 바닥이 평평해 그대로 눕혀 뽑는다.
 // 마개(plug): 테이퍼 축에 물길 구멍. 손잡이가 관과 나란하면 열림, 직각이면 닫힘.
@@ -440,6 +492,7 @@ else if (part == "core_joint") {  // 쌓기 이음 시험: 코어 아래 끝 어
 }
 else if (part == "tray") translate([0, 0, (tr_b - tr_zb) / sqrt(2)]) rotate([45, 0, 0]) tray_full();
 else if (part == "gate") translate([0, 0, 1]) rotate([0, -90, 0]) translate([-gate_x, 0, 0]) gate();
+else if (part == "tank") translate([-tk_x[0], 0, -tr_zb]) tank();
 else if (part == "basket") translate([-bk_x[0], 0, sqrt(R * R - pow(win_w / 2, 2)) + max(2, 3 * k)]) rotate([180, 0, 0]) basket();
 else if (part == "valve_body") translate([0, 0, dk_w]) valve_body();
 else if (part == "valve_plug") translate([0, 0, 16 + 6]) rotate([180, 0, 0]) valve_plug();

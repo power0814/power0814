@@ -3,3 +3,5 @@ slice/*.log
 __pycache__/
 slice/test/*.gcode
 slice/test/*.log
+slice/struct/*.gcode
+slice/struct/*.log
