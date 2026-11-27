@@ -12,12 +12,13 @@
 //   3) 물받이 가운데 물길을 따라 바깥 끝까지 갔다가 양쪽 칸을 거슬러 코어 쪽 넘침 둑을 넘고
 //   4) 주둥이로 받침 링 위 홈통에 떨어져, 코어 벽 구멍으로 지붕 아래 코어 속에 들어가 아래층 지붕으로 떨어진다.
 //   마개: 물받이 가운데 물길에 끼우면 그 팔은 윗물을 받지 않는다 (넘쳐 돌아가는 둑으로 바로 아래로).
-//   맨 아래 층은 필로티: 팔이 바닥에 놓이고 물길에서 빠진다. 그 코어 위쪽이 집수조이고 대각선에 배수 밸브가 있다.
+//   맨 아래 층도 팔이 매달린 물길 층이다(필로티 없음). 그 코어가 팔 아래로 이어져 집수 바닥과 대각선 배수 밸브를 품고,
+//   받침판 소켓에 꽂힌다. (처음에는 필로티였다: 바닥에 눕힌 팔이 코어 들림을 막지 못해 판으로 바꿨다)
 //
-// part = "floor"       맨 아래 층 (팔이 바닥에 놓임)              "floor_water"     그 물받이·밸브
+// part = "floor"       받침판 + 맨 아래 층                         "floor_water"     그 물받이·마개·밸브
 //        "floor_mid"   가운데 층 하나, 팔 축 z = 0                 "floor_mid_water" 그 물받이·마개
-//        "tower"       맨 아래 층 + 둘째 층, 물 부품까지 (틈 검사용)
-//        "arm" "core" "core_base" "core_joint" "tray" "gate" "basket" "tank" "valve_body" "valve_plug"   출력 방향
+//        "tower"       받침판 + 맨 아래 층 + 둘째 층, 물 부품까지 (틈 검사용)
+//        "arm" "core" "core_base" "plate" "core_joint" "tray" "gate" "basket" "tank" "valve_body" "valve_plug"   출력 방향
 // openscad -o stl/cross_arm.stl -D 'part="arm"' cross_floor.scad
 
 part = "floor";
@@ -90,8 +91,14 @@ bk_y   = [max(-8 * k, dv_y + tw + 1.5), min(28 * k, 32 * k - 2)];
 bk_w   = max(1.2, 1.6 * k);
 sp_r   = Rc + 1.5;   // 주둥이 끝 (코어 축에서). 받침 링 홈통 위
 sp_h   = max(5, 8 * k);      // 주둥이 옆벽 높이 (바닥 위)
-// 배수 (맨 아래 마디)
-sump_z = 66 * k;     // 집수 바닥(원뿔)이 코어 벽 안쪽과 만나는 높이 = 배수 관 바닥
+// 맨 아래 층과 받침판
+// 맨 아래 층도 팔이 매달린 물길 층이다 (필로티 없음). 그 코어는 팔 아래로 짧은 기둥이 이어져
+// 집수 바닥과 배수 밸브를 품고, 받침판의 소켓에 깊이 꽂힌다. 탑이 넘어지려면 판 전체가 들려야 한다.
+sump_z = -D / 2 - 25;    // 집수 바닥(원뿔)이 코어 벽 안쪽과 만나는 높이 = 배수 관 바닥. 밸브 손잡이 윗면(+22)이 팔 아랫면 3 mm 아래
+sock_h = max(20, 50 * k);   // 받침판 소켓 깊이 (코어 지름의 약 절반)
+pl_w   = 480 * k;    // 받침판 한 변
+pl_t   = max(6, 10 * k);    // 받침판 두께
+sl_w   = max(2, 3 * k);     // 소켓 벽
 dk_i   = 4;          // 배수 관 물길 반너비
 dk_w   = 1.8;        // 배수 관 벽
 vx     = max(84 * k, Rc + 23);   // 밸브 마개 자리 (코어 축에서, 대각선)
@@ -212,7 +219,10 @@ module duct2d(d = 0) {          // 배수 관 물길 단면: 바닥 평평, 지�
 module duct_prism(d, x0, x1) {  // x 방향으로 뻗은 배수 관 단면
     translate([x0, 0, 0]) rotate([90, 0, 90]) linear_extrude(x1 - x0) duct2d(d);
 }
+function core_bot() = sump_z - 11.5 - 3 - sock_h;   // 맨 아래 코어 바닥 = 받침판 윗면 (밸브 자리 아랫면과 소켓 윗끝 사이 3 mm)
 module core(z0 = -Hf / 2, base = false) {
+    // base = true: 맨 아래 코어. 가운데 마디와 같은 물길 층(턱, 홈통, 받이 지붕, 홈통 구멍)에
+    // 꽂이 대신 아래로 기둥이 이어져 집수 바닥과 배수 관 자리를 품고, 바닥(z0)은 받침판 소켓에 앉는다.
     Ri = Rc - wc;
     Rs = Ri - clr;                       // 아래 끝 꽂이 바깥 반지름
     zb = -Hf / 2 + (wc - ch + 0.1);      // 가운데 마디 몸통 아래 끝. 그 아래로 어깨(45°)와 꽂이 (0.1 은 모델에서 두 면을 떼어 두는 몫)
@@ -235,19 +245,10 @@ module core(z0 = -Hf / 2, base = false) {
                     [Rc - 0.01, heel_z[0] - cl_out], [Rc + cl_out, heel_z[0]],
                     [Rc + cl_out, heel_z[1] + rim_h], [Rc + cl_out - rim_t, heel_z[1] + rim_h],
                     [Rc + cl_out - rim_t, heel_z[1]], [Rc - 0.01, heel_z[1]]]);
-                if (!base) for (a = [0, 90, 180, 270]) rotate(a) chute();
-                else intersection() {   // 배수 관 꽂는 자리 (아랫면 45°). 모서리는 맨 아래 층 팔 끝 원 안으로 (반 크기에서 닿았다)
-                    rotate(45) translate([0, 0, sump_z]) hull() {
-                        duct_prism(dk_w + 0.2 + 2.5, Rc - 1, Rc + 6);
-                        translate([0, 0, -7]) duct_prism(dk_w + 0.2 + 2.5, Rc - 1, Rc - 0.5);
-                    }
-                    cylinder(h = 4 * R, r = Rc + cl_out + gapc - 0.3, center = true);
-                    // 맨 아래 층 팔 갈고리가 지나가는 부채꼴을 비운다 (반 크기에서 자리 옆면과 겹쳤다)
-                    let(al = asin((hook_w / 2) / (Rc + cl_out + gapc)) + 1.5) difference() {
-                        cylinder(h = 4 * R, r = 3 * Rc, center = true);
-                        for (a = [0, 90]) rotate(a - al) rotate_extrude(angle = 2 * al)
-                            polygon([[Rc + 0.01, cl_z - cl_out], [3 * Rc, cl_z - cl_out], [3 * Rc, 2 * R], [Rc + 0.01, 2 * R]]);
-                    }
+                for (a = [0, 90, 180, 270]) rotate(a) chute();
+                if (base) rotate(45) translate([0, 0, sump_z]) hull() {   // 배수 관 꽂는 자리 (아랫면 45°). 팔 아래, 대각선
+                    duct_prism(dk_w + 0.2 + 2.5, Rc - 1, Rc + 6);
+                    translate([0, 0, -7]) duct_prism(dk_w + 0.2 + 2.5, Rc - 1, Rc - 0.5);
                 }
             }
             translate([0, 0, base ? z0 : -Hf]) cylinder(h = 2 * Hf, r = 3 * Rc);   // 맨 아래 마디는 바닥 아래를 자른다
@@ -257,23 +258,50 @@ module core(z0 = -Hf / 2, base = false) {
         if (!base) {
             translate([0, 0, zb - (Rc - Rs) - 0.001]) cylinder(h = Rc - Rs + 0.002, r1 = Rs - wc, r2 = Ri);
             translate([0, 0, zb - (Rc - Rs) - spig - 1]) cylinder(h = spig + 1.001, r = Rs - wc);
-            for (a = [0, 90, 180, 270]) rotate(a) {
-                chute_channel();                                       // 팔로 나가는 구멍과 홈통 물길
-                chute_drip();
-                for (sg = [-1, 1]) rotate(sg * gut_a)                   // 받침 링 홈통에서 코어 속으로 돌아가는 구멍 (위는 45° 뾰족)
-                    translate([Ri - 1, 0, heel_z[1]]) rotate([90, 0, 90]) linear_extrude(wc + 2)
-                        polygon([[-gut_w / 2, 0], [gut_w / 2, 0], [gut_w / 2, gut_h], [0, gut_h + gut_w / 2], [-gut_w / 2, gut_h]]);
-            }
-        } else rotate(45) translate([0, 0, sump_z]) duct_prism(dk_w + 0.2, Ri - 1, Rc + 7);   // 배수 관 구멍
+        }
+        for (a = [0, 90, 180, 270]) rotate(a) {
+            chute_channel();                                       // 팔로 나가는 구멍과 홈통 물길
+            chute_drip();
+            for (sg = [-1, 1]) rotate(sg * gut_a)                   // 받침 링 홈통에서 코어 속으로 돌아가는 구멍 (위는 45° 뾰족)
+                translate([Ri - 1, 0, heel_z[1]]) rotate([90, 0, 90]) linear_extrude(wc + 2)
+                    polygon([[-gut_w / 2, 0], [gut_w / 2, 0], [gut_w / 2, gut_h], [0, gut_h + gut_w / 2], [-gut_w / 2, gut_h]]);
+        }
+        if (base) rotate(45) translate([0, 0, sump_z]) duct_prism(dk_w + 0.2, Ri - 1, Rc + 7);   // 배수 관 구멍
     }
-    difference() {                        // 받이 지붕 (가운데 마디) / 집수 바닥 (맨 아래 마디)
-        roof_cone(base ? sump_z : roof_z);
+    roof_cone(roof_z);                    // 받이 지붕
+    if (base) difference() {              // 집수 바닥 (맨 아래 코어, 팔 아래)
+        roof_cone(sump_z);
         // 집수 바닥은 관 물길(바닥 = sump_z)만큼만 판다. 밸브 관이 끼는 넓은 구멍(바닥 sump_z − 2)은
         // 코어 벽 안쪽(Ri 바깥)에서만 판다: 벽 안쪽 공간에서 넓게 파면 원뿔을 뚫어 물이 코어 아래로 샌다
-        if (base) rotate(45) translate([0, 0, sump_z]) {
+        rotate(45) translate([0, 0, sump_z]) {
             duct_prism(0, Rc - wc - 1, Rc + 7);
             duct_prism(dk_w + 0.2, Rc - wc, Rc + 7);
         }
+    }
+}
+
+// ---------- 받침판 ----------
+// 맨 아래 코어가 소켓(틈 clr, 깊이 sock_h)에 꽂힌다. 판 윗면 = 코어 바닥 = core_bot().
+// 아랫면 네 모서리에 TPU 패드 홈 (지름 20.4, 깊이 1.5: bookshelf/pad.scad 의 패드).
+// 출력: 아랫면을 판에 대고 그대로 (소켓 벽은 세로, 밑동은 45°).
+module plate() {
+    zt = core_bot();
+    ri = Rc + clr;
+    ro = ri + sl_w;
+    c = pl_t / 2;                         // 윗 모서리 모따기
+    difference() {
+        union() {
+            translate([0, 0, zt - pl_t]) hull() {
+                translate([-pl_w / 2, -pl_w / 2, 0]) cube([pl_w, pl_w, pl_t - c]);
+                translate([-pl_w / 2 + c, -pl_w / 2 + c, 0]) cube([pl_w - 2 * c, pl_w - 2 * c, pl_t]);
+            }
+            translate([0, 0, zt - 0.01]) cylinder(h = sock_h + 0.01, r = ro);
+            translate([0, 0, zt - 0.01]) cylinder(h = 2 * sl_w + 0.01, r1 = ro + 2 * sl_w, r2 = ro);   // 소켓 밑동 (45°)
+        }
+        translate([0, 0, zt - 0.2]) cylinder(h = sock_h + 1, r = ri);              // 소켓 (바닥에 0.2 홈: 코어 바닥 모서리가 뜨지 않게)
+        translate([0, 0, zt + sock_h - 0.8]) cylinder(h = 0.81, r1 = ri, r2 = ri + 0.8);   // 소켓 입구 모따기
+        for (sx = [-1, 1], sy = [-1, 1]) translate([sx * (pl_w / 2 - 25), sy * (pl_w / 2 - 25), zt - pl_t - 1])
+            cylinder(h = 1.5 + 1, d = 20.4);
     }
 }
 
@@ -464,27 +492,30 @@ module valve_plug() {
 }
 
 module floor_set(base = false) {
-    core(base ? -R : -Hf / 2, base);
+    if (base) { core(core_bot(), true); plate(); }
+    else core();
     for (a = [0, 90, 180, 270]) rotate(a) arm();
 }
 module water_set(base = false) {
-    for (a = [0, 90, 180, 270]) rotate(a) { tray_full(); basket(); if (!base) gate(); }
+    for (a = [0, 90, 180, 270]) rotate(a) { tray_full(); basket(); gate(); }
     if (base) rotate(45) translate([0, 0, sump_z]) { valve_body(); translate([vx, 0, 0]) valve_plug(); }
 }
+function base_lift() = pl_t - core_bot();   // 맨 아래 층 팔 축 높이 (탁자에서)
 
-if (part == "floor") translate([0, 0, R]) floor_set(true);
-else if (part == "floor_water") translate([0, 0, R]) water_set(true);
+if (part == "floor") translate([0, 0, base_lift()]) floor_set(true);
+else if (part == "floor_water") translate([0, 0, base_lift()]) water_set(true);
 else if (part == "floor_mid") floor_set();
 else if (part == "floor_mid_water") water_set();
-else if (part == "tower") {      // 맨 아래 층 + 둘째 층, 물 부품까지
-    translate([0, 0, R]) {
+else if (part == "tower") {      // 받침판 + 맨 아래 층 + 둘째 층, 물 부품까지
+    translate([0, 0, base_lift()]) {
         floor_set(true); water_set(true);
         translate([0, 0, Hf]) rotate(twist) { floor_set(); water_set(); }
     }
 }
 else if (part == "arm")   translate([0, 0, reach]) rotate([0, 90, 0]) arm();     // 바깥 끝이 바닥, 코어 쪽이 위
 else if (part == "core")  translate([0, 0, -core_low()]) core();      // 아래 꽂이 끝이 바닥
-else if (part == "core_base") translate([0, 0, R]) core(-R, true);
+else if (part == "core_base") translate([0, 0, -core_bot()]) core(core_bot(), true);
+else if (part == "plate") translate([0, 0, pl_t - core_bot()]) plate();
 else if (part == "core_joint") {  // 쌓기 이음 시험: 코어 아래 끝 어깨·꽂이 (꽂는 쪽) + 위 끝 30 mm (받는 쪽)
     zb = -Hf / 2 + (wc - ch + 0.1);
     translate([-Rc - 8, 0, 0]) intersection() { translate([0, 0, -core_low()]) core(); cylinder(h = zb + 25 - core_low(), r = 2 * Rc); }
@@ -498,4 +529,5 @@ else if (part == "valve_body") translate([0, 0, dk_w]) valve_body();
 else if (part == "valve_plug") translate([0, 0, 16 + 6]) rotate([180, 0, 0]) valve_plug();
 
 echo(str("DIMS cross_span=", 2 * reach, " arm_D=", D, " core_D=", 2 * Rc, " floor_h=", Hf,
-         " arm_print_h=", reach - (Rc + gapc)));
+         " arm_print_h=", reach - (Rc + gapc), " base_core_h=", Hf / 2 - core_bot(), " base_axis_from_table=", base_lift(),
+         " plate=", pl_w, " plate_fits_bed=", pl_w <= 320));
